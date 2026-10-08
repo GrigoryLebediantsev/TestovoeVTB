@@ -35,6 +35,7 @@ async def extract_statement(self: Usecase, input: dto.ExtractStatementInput) -> 
         transactions.extend(product_extraction.transactions)
         product_reports.append(product_extraction.report)
         warnings.extend(product_extraction.warnings)
+    warnings.extend(_mark_card_duplicates(products, transactions))
     extracted_at = datetime.datetime.now(datetime.UTC)
 
     statement = domain.Statement(
@@ -106,3 +107,18 @@ async def _ask_consent(self: Usecase, period: domain.Period) -> domain.Consent:
         scope=scope,
         granted_at=datetime.datetime.now(datetime.UTC),
     )
+
+
+def _mark_card_duplicates(products: list[domain.Product], transactions: list[domain.Transaction]) -> list[str]:
+    """Помечает копии на карте операций, видимых и на привязанном счёте; возвращает предупреждения."""
+    pairs = domain.find_card_duplicates(products, transactions)
+    warnings = []
+    for pair in pairs:
+        pair.card_transaction.is_duplicate = True
+        warnings.append(
+            f'Продукт {pair.card_transaction.product_id}: операция {pair.card_transaction.transaction_id} '
+            f'совпадает с операцией {pair.account_transaction.transaction_id} '
+            f'продукта {pair.account_transaction.product_id}'
+        )
+    log.info('Card duplicates marked', extra={'duplicates_count': len(pairs)})
+    return warnings

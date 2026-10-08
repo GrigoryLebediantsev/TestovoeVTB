@@ -27,6 +27,14 @@ class TransactionCategory(enum.StrEnum):
     INTEREST = 'interest'
     WITHDRAWAL = 'withdrawal'
     TRANSFER = 'transfer'
+    SALARY = 'salary'
+    GROCERIES = 'groceries'
+    RESTAURANTS = 'restaurants'
+    TRANSPORT = 'transport'
+    SHOPPING = 'shopping'
+    REFUND = 'refund'
+    UTILITIES = 'utilities'
+    FEE = 'fee'
     OTHER = 'other'
 
 

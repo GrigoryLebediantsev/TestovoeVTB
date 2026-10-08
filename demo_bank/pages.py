@@ -13,6 +13,8 @@ from .data import (
     PRODUCTS_BY_ID,
     DemoProduct,
     DemoTransaction,
+    HistoryLoading,
+    filter_by_posting_date,
 )
 
 CURRENCY_SYMBOLS = {'RUB': '₽', 'USD': '$', 'EUR': '€'}
@@ -34,6 +36,7 @@ button { margin-top: 16px; padding: 8px 16px; }
 .period-filter input { width: auto; }
 .transactions-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .transactions-table td, .transactions-table th { border-bottom: 1px solid #ddd; padding: 6px 4px; text-align: left; }
+.scroll-spacer { height: 100vh; }
 """
 
 
@@ -165,35 +168,95 @@ def product_page(product: DemoProduct, date_from: datetime.date | None, date_to:
     )
 
 
-def filter_by_posting_date(
-    transactions: list[DemoTransaction], date_from: datetime.date | None, date_to: datetime.date | None
-) -> list[DemoTransaction]:
-    """Фильтр кабинета: по дате проведения, у непроведённых — по дате операции."""
-    selected = []
-    for transaction in transactions:
-        filter_date = transaction.posting_date or transaction.operation_date
-        if date_from and filter_date < date_from:
-            continue
-        if date_to and filter_date > date_to:
-            continue
-        selected.append(transaction)
-    return selected
+TRANSACTIONS_TABLE_HEAD = """<thead><tr><th>Дата</th><th>Проведена</th><th>Описание</th><th>Контрагент</th>
+<th>Категория</th><th>Статус</th><th>Сумма</th></tr></thead>"""
+EMPTY_HISTORY = '<p class="transactions-empty">Операций нет</p>'
+
+# Подгрузка истории порциями: страница сама запрашивает сервер и дописывает строки в таблицу
+PORTION_LOADER_SCRIPT = """<script>
+(() => {
+  const section = document.querySelector('[data-testid="transactions"]');
+  const tableBody = section.querySelector('tbody');
+  const pageQuery = new URLSearchParams(location.search);
+  const currencySymbols = {RUB: '₽', USD: '$', EUR: '€'};
+  const statusLabels = {POSTED: 'Проведена', PENDING: 'В обработке', DECLINED: 'Отклонена'};
+  let offset = 0;
+  let hasMore = true;
+  let isLoading = false;
+
+  const formatDate = value => value ? value.split('-').reverse().join('.') : '—';
+  const formatMoney = (amount, currency) => {
+    const number = Number(amount);
+    const sign = number < 0 ? '−' : number > 0 ? '+' : '';
+    const [integerPart, fractionPart] = Math.abs(number).toFixed(2).split('.');
+    const grouped = integerPart.replace(/\\B(?=(\\d{3})+(?!\\d))/g, '\u00a0');
+    return `${sign}${grouped},${fractionPart}\u00a0${currencySymbols[currency]}`;
+  };
+  const addCell = (row, name, text) => {
+    const cell = row.insertCell();
+    cell.className = 'transaction-' + name;
+    cell.textContent = text;
+  };
+  const addRow = item => {
+    const row = tableBody.insertRow();
+    row.className = 'transaction';
+    if (item.id) row.dataset.transactionId = item.id;
+    addCell(row, 'date', formatDate(item.operationDate));
+    addCell(row, 'posting-date', formatDate(item.postingDate));
+    addCell(row, 'description', item.description);
+    addCell(row, 'counterparty', item.counterparty || '—');
+    addCell(row, 'category', item.category);
+    addCell(row, 'status', statusLabels[item.status] || item.status);
+    addCell(row, 'amount', formatMoney(item.amount, item.currency));
+  };
+
+  async function loadPortion() {
+    if (isLoading || !hasMore) return;
+    isLoading = true;
+    const query = new URLSearchParams({offset: String(offset)});
+    for (const name of ['from', 'to']) {
+      if (pageQuery.get(name)) query.set(name, pageQuery.get(name));
+    }
+    const response = await fetch(`/api/products/${section.dataset.productId}/transactions?${query}`);
+    if (!response.ok) {
+      section.dataset.state = 'error';
+      section.querySelector('.transactions-status').textContent = 'Не удалось загрузить операции';
+      isLoading = false;
+      return;
+    }
+    const portion = await response.json();
+    portion.items.forEach(addRow);
+    offset += portion.items.length;
+    hasMore = portion.hasMore;
+    if (offset === 0) section.querySelector('.transactions-status').innerHTML = '__EMPTY_HISTORY__';
+    if (!hasMore) section.querySelectorAll('.show-more, .load-more-sentinel').forEach(item => item.remove());
+    section.dataset.state = 'ready';
+    isLoading = false;
+  }
+
+  section.querySelector('.show-more')?.addEventListener('click', loadPortion);
+  const sentinel = section.querySelector('.load-more-sentinel');
+  if (sentinel) {
+    window.addEventListener('scroll', () => {
+      if (sentinel.isConnected && sentinel.getBoundingClientRect().top <= window.innerHeight) loadPortion();
+    });
+  }
+  loadPortion();
+})();
+</script>""".replace('__EMPTY_HISTORY__', EMPTY_HISTORY)
 
 
 def _transactions_section(product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None) -> str:
-    transactions = filter_by_posting_date(product.transactions, date_from, date_to)
-    if transactions:
-        rows = ''.join(_transaction_row(transaction, product.currency) for transaction in transactions)
-        history = f"""<table class="transactions-table">
-<thead><tr><th>Дата</th><th>Проведена</th><th>Описание</th><th>Контрагент</th><th>Категория</th><th>Статус</th>
-<th>Сумма</th></tr></thead>
-<tbody>{rows}</tbody>
-</table>"""
+    if product.history_loading == HistoryLoading.PAGE:
+        history = _render_page_history(product, date_from, date_to)
+        state = 'ready'
     else:
-        history = '<p class="transactions-empty">Операций нет</p>'
+        history = _render_portion_history(product.history_loading)
+        state = 'loading'
     from_value = date_from.isoformat() if date_from else ''
     to_value = date_to.isoformat() if date_to else ''
-    return f"""<section class="transactions" data-testid="transactions">
+    return f"""<section class="transactions" data-testid="transactions" data-state="{state}"
+  data-product-id="{escape(product.product_id)}">
 <h2>Операции</h2>
 <form class="period-filter" method="get">
   <label>С <input name="from" type="date" value="{from_value}"></label>
@@ -202,6 +265,25 @@ def _transactions_section(product: DemoProduct, date_from: datetime.date | None,
 </form>
 {history}
 </section>"""
+
+
+def _render_page_history(product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None) -> str:
+    transactions = filter_by_posting_date(product.transactions, date_from, date_to)
+    if not transactions:
+        return EMPTY_HISTORY
+    rows = ''.join(_transaction_row(transaction, product.currency) for transaction in transactions)
+    return f'<table class="transactions-table">{TRANSACTIONS_TABLE_HEAD}<tbody>{rows}</tbody></table>'
+
+
+def _render_portion_history(history_loading: HistoryLoading) -> str:
+    if history_loading == HistoryLoading.SHOW_MORE:
+        more_control = '<button type="button" class="show-more">Показать ещё</button>'
+    else:
+        more_control = '<div class="scroll-spacer"></div><div class="load-more-sentinel"></div>'
+    return f"""<table class="transactions-table">{TRANSACTIONS_TABLE_HEAD}<tbody></tbody></table>
+<div class="transactions-status"></div>
+{more_control}
+{PORTION_LOADER_SCRIPT}"""
 
 
 def _transaction_row(transaction: DemoTransaction, currency: str) -> str:

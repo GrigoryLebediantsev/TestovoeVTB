@@ -4,6 +4,10 @@ import datetime
 import re
 from dataclasses import dataclass
 from decimal import Decimal
+from urllib.parse import parse_qs, urlparse
+
+import pydantic
+from pydantic.alias_generators import to_camel
 
 from src import domain
 
@@ -34,6 +38,21 @@ TRANSACTION_CATEGORY_BY_LABEL = {
     'проценты': domain.TransactionCategory.INTEREST,
     'снятие': domain.TransactionCategory.WITHDRAWAL,
     'перевод': domain.TransactionCategory.TRANSFER,
+    'зарплата': domain.TransactionCategory.SALARY,
+    'супермаркеты': domain.TransactionCategory.GROCERIES,
+    'рестораны': domain.TransactionCategory.RESTAURANTS,
+    'транспорт': domain.TransactionCategory.TRANSPORT,
+    'покупки': domain.TransactionCategory.SHOPPING,
+    'возврат': domain.TransactionCategory.REFUND,
+    'коммунальные платежи': domain.TransactionCategory.UTILITIES,
+    'комиссия': domain.TransactionCategory.FEE,
+}
+
+# В ответах сервера статус — код, а не подпись
+TRANSACTION_STATUS_BY_SERVER_CODE = {
+    'POSTED': domain.TransactionStatus.POSTED,
+    'PENDING': domain.TransactionStatus.PENDING,
+    'DECLINED': domain.TransactionStatus.DECLINED,
 }
 
 # Так кабинет показывает пустую ячейку
@@ -66,6 +85,31 @@ class TransactionRow:
     category: str
     status: str
     amount: str
+
+
+class FetchedTransaction(pydantic.BaseModel):
+    """Операция в ответе сервера банка: даты ISO, сумма строкой с точкой, код валюты."""
+
+    model_config = pydantic.ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str | None
+    operation_date: datetime.date
+    posting_date: datetime.date | None
+    amount: Decimal
+    currency: str = pydantic.Field(pattern=r'^[A-Z]{3}$')
+    description: str
+    counterparty: str | None
+    category: str
+    status: str
+
+
+class FetchTransactionsResponse(pydantic.BaseModel):
+    """Порция истории, которую страница получает от сервера банка."""
+
+    model_config = pydantic.ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    items: list[FetchedTransaction]
+    has_more: bool
 
 
 @dataclass
@@ -119,6 +163,37 @@ def parse_transaction_status(text: str) -> domain.TransactionStatus:
 
 def parse_transaction_category(text: str) -> domain.TransactionCategory:
     return TRANSACTION_CATEGORY_BY_LABEL.get(text.strip().lower(), domain.TransactionCategory.OTHER)
+
+
+def parse_server_status(code: str) -> domain.TransactionStatus:
+    status = TRANSACTION_STATUS_BY_SERVER_CODE.get(code.strip().upper())
+    if not status:
+        raise ValueError(f'Unknown transaction status code: {code!r}')
+    return status
+
+
+def is_history_response_url(url: str, product_id: str, period: domain.Period | None) -> bool:
+    """Ответ сервера с порцией истории продукта; если период задан — только за этот период."""
+    parsed_url = urlparse(url)
+    if parsed_url.path != selectors.HISTORY_API_PATH.format(product_id=product_id):
+        return False
+    if period is None:
+        return True
+    query = parse_qs(parsed_url.query)
+    date_from = query.get(selectors.HISTORY_API_FROM_PARAM, [''])[0]
+    date_to = query.get(selectors.HISTORY_API_TO_PARAM, [''])[0]
+    return date_from == period.date_from.isoformat() and date_to == period.date_to.isoformat()
+
+
+def parse_server_portion(data: object) -> FetchTransactionsResponse:
+    """Проверяет формат ответа сервера; незнакомый формат — ValueError."""
+    return FetchTransactionsResponse.model_validate(data)
+
+
+def parse_server_transactions(product_id: str, items: list[FetchedTransaction]) -> list[domain.Transaction]:
+    """Приводит операции из ответов сервера к единой схеме; items — все порции истории продукта по порядку."""
+    id_generator = domain.TransactionIdGenerator()
+    return [_parse_server_transaction(product_id, item, id_generator) for item in items]
 
 
 def parse_transactions(product_id: str, rows: list[TransactionRow]) -> list[domain.Transaction]:
@@ -209,6 +284,33 @@ def _parse_transaction(
         counterparty=None if _is_empty_cell(row.counterparty) else _normalize_spaces(row.counterparty),
         category=parse_transaction_category(row.category),
         status=parse_transaction_status(row.status),
+    )
+
+
+def _parse_server_transaction(
+    product_id: str, item: FetchedTransaction, id_generator: domain.TransactionIdGenerator
+) -> domain.Transaction:
+    description = _normalize_spaces(item.description)
+    if item.id:
+        transaction_id = item.id
+        id_source = domain.TransactionIdSource.BANK
+    else:
+        transaction_id = id_generator.next_id(product_id, item.operation_date, item.amount, description)
+        id_source = domain.TransactionIdSource.GENERATED
+
+    return domain.Transaction(
+        transaction_id=transaction_id,
+        id_source=id_source,
+        product_id=product_id,
+        operation_date=item.operation_date,
+        posting_date=item.posting_date,
+        amount=item.amount,
+        currency=item.currency,
+        type=domain.transaction_type_for_amount(item.amount),
+        description=description,
+        counterparty=_normalize_spaces(item.counterparty) if item.counterparty else None,
+        category=parse_transaction_category(item.category),
+        status=parse_server_status(item.status),
     )
 
 

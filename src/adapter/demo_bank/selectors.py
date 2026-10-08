@@ -33,3 +33,11 @@ PERIOD_FILTER_TO = '.period-filter input[name="to"]'
 PERIOD_FILTER_SUBMIT = '.period-filter button[type="submit"]'
 TRANSACTIONS_SECTION = '[data-testid="transactions"]'
 TRANSACTION_ROW = '[data-testid="transactions"] tr.transaction'
+TRANSACTIONS_READY = '[data-testid="transactions"][data-state="ready"]'
+SHOW_MORE_BUTTON = '[data-testid="transactions"] button.show-more'
+SCROLL_SENTINEL = '[data-testid="transactions"] .load-more-sentinel'
+
+# Запросы страницы к серверу банка за порциями истории
+HISTORY_API_PATH = '/api/products/{product_id}/transactions'
+HISTORY_API_FROM_PARAM = 'from'
+HISTORY_API_TO_PARAM = 'to'

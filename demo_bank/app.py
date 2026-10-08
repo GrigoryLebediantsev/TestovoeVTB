@@ -7,10 +7,10 @@ from urllib.parse import parse_qs
 
 import pydantic
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from . import pages
-from .data import PRODUCTS_BY_ID
+from .data import PRODUCTS_BY_ID, DemoProduct, DemoTransaction, filter_by_posting_date
 
 DEMO_LOGIN = 'demo'
 DEMO_PASSWORD = 'demo'
@@ -18,6 +18,9 @@ DEMO_ONE_TIME_CODE = '0000'
 
 PENDING_COOKIE = 'demo_pending'
 SESSION_COOKIE = 'demo_session'
+
+HISTORY_PORTION_SIZE = 5
+STATUS_CODE_BY_LABEL = {'Проведена': 'POSTED', 'В обработке': 'PENDING', 'Отклонена': 'DECLINED'}
 
 
 class DemoBankMode(enum.StrEnum):
@@ -29,6 +32,8 @@ class DemoBankState:
     mode: DemoBankMode
     pending_logins: set[str] = field(default_factory=set)  # прошли логин и пароль, ждут код
     sessions: set[str] = field(default_factory=set)
+    # Запросы порций истории — по ним тест проверяет, что прототип не делает своих запросов
+    history_requests: list[dict[str, object]] = field(default_factory=list)
 
 
 class SetModeRequest(pydantic.BaseModel):
@@ -106,7 +111,36 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
             return HTMLResponse(pages.layout('Не найдено', '<h1>Продукт не найден</h1>'), status_code=404)
         return HTMLResponse(pages.product_page(product, _parse_query_date(date_from), _parse_query_date(date_to)))
 
+    @app.get('/api/products/{product_id}/transactions')
+    async def get_history_portion(
+        product_id: str,
+        request: Request,
+        offset: int = 0,
+        date_from: Annotated[str, Query(alias='from')] = '',
+        date_to: Annotated[str, Query(alias='to')] = '',
+    ) -> Response:
+        if not is_signed_in(request):
+            return JSONResponse({'detail': 'Not signed in'}, status_code=401)
+        product = PRODUCTS_BY_ID.get(product_id)
+        if product is None:
+            return JSONResponse({'detail': 'Product not found'}, status_code=404)
+        state.history_requests.append({'product_id': product_id, 'from': date_from, 'to': date_to, 'offset': offset})
+        transactions = filter_by_posting_date(
+            product.transactions, _parse_query_date(date_from), _parse_query_date(date_to)
+        )
+        portion = transactions[offset : offset + HISTORY_PORTION_SIZE]
+        return JSONResponse(
+            {
+                'items': [_build_history_item(transaction, product) for transaction in portion],
+                'hasMore': offset + HISTORY_PORTION_SIZE < len(transactions),
+            }
+        )
+
     # --- Служебные адреса для тестов ---
+
+    @app.get('/_test/api-calls')
+    async def get_api_calls() -> list[dict[str, object]]:
+        return state.history_requests
 
     @app.get('/_test/health')
     async def health() -> dict[str, str]:
@@ -117,6 +151,7 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
         state.mode = request.mode
         state.pending_logins.clear()
         state.sessions.clear()
+        state.history_requests.clear()
         return {'mode': state.mode}
 
     return app
@@ -126,6 +161,21 @@ async def _read_form(request: Request) -> dict[str, str]:
     """Разбор формы без python-multipart: тело application/x-www-form-urlencoded."""
     body = (await request.body()).decode()
     return {key: values[0] for key, values in parse_qs(body).items()}
+
+
+def _build_history_item(transaction: DemoTransaction, product: DemoProduct) -> dict[str, object]:
+    """Операция в формате сервера: даты ISO, сумма строкой с точкой, статус кодом — не как на странице."""
+    return {
+        'id': transaction.bank_id,
+        'operationDate': transaction.operation_date.isoformat(),
+        'postingDate': transaction.posting_date.isoformat() if transaction.posting_date else None,
+        'amount': f'{transaction.amount:.2f}',
+        'currency': product.currency,
+        'description': transaction.description,
+        'counterparty': transaction.counterparty,
+        'category': transaction.category,
+        'status': STATUS_CODE_BY_LABEL[transaction.status],
+    }
 
 
 def _parse_query_date(value: str) -> datetime.date | None:

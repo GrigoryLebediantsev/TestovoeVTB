@@ -1,4 +1,5 @@
 from .consent import CONSENT_SCOPE, Consent
+from .duplicates import DuplicatePair, find_card_duplicates
 from .error import (
     AccessDeniedError,
     ConsentRefused,
@@ -34,6 +35,7 @@ __all__ = [
     'ConsentRefused',
     'ConsentTimeout',
     'DomainError',
+    'DuplicatePair',
     'ExternalServiceError',
     'ExtractionReport',
     'ExtractionSource',
@@ -56,6 +58,7 @@ __all__ = [
     'TransactionStatus',
     'TransactionType',
     'build_run_folder_name',
+    'find_card_duplicates',
     'mask_number',
     'split_by_period',
     'transaction_type_for_amount',

@@ -6,6 +6,31 @@ import pytest
 from src import domain
 from src.adapter.demo_bank import parsing
 
+HISTORY_PERIOD = domain.Period(date_from=datetime.date(2026, 5, 1), date_to=datetime.date(2026, 6, 30))
+CARD_PURCHASE_ITEM: dict[str, object] = {
+    'id': 'tx-c-001',
+    'operationDate': '2026-05-03',
+    'postingDate': '2026-05-04',
+    'amount': '-1450.00',
+    'currency': 'RUB',
+    'description': 'Пятёрочка',
+    'counterparty': 'Пятёрочка',
+    'category': 'Супермаркеты',
+    'status': 'POSTED',
+}
+PENDING_REFUND_ITEM: dict[str, object] = {
+    'id': None,
+    'operationDate': '2026-06-28',
+    'postingDate': None,
+    'amount': '640',
+    'currency': 'RUB',
+    'description': 'Возврат: Кофейня',
+    'counterparty': None,
+    'category': 'Возврат',
+    'status': 'PENDING',
+}
+SERVER_PORTION: dict[str, object] = {'items': [CARD_PURCHASE_ITEM, PENDING_REFUND_ITEM], 'hasMore': True}
+
 
 @pytest.mark.parametrize(
     ('text', 'expected_amount', 'expected_currency'),
@@ -165,6 +190,14 @@ def test_parse_transaction_status_rejects_unknown() -> None:
         ('Снятие', domain.TransactionCategory.WITHDRAWAL),
         ('Перевод', domain.TransactionCategory.TRANSFER),
         (' перевод ', domain.TransactionCategory.TRANSFER),
+        ('Зарплата', domain.TransactionCategory.SALARY),
+        ('Супермаркеты', domain.TransactionCategory.GROCERIES),
+        ('Рестораны', domain.TransactionCategory.RESTAURANTS),
+        ('Транспорт', domain.TransactionCategory.TRANSPORT),
+        ('Покупки', domain.TransactionCategory.SHOPPING),
+        ('Возврат', domain.TransactionCategory.REFUND),
+        ('Коммунальные платежи', domain.TransactionCategory.UTILITIES),
+        ('Комиссия', domain.TransactionCategory.FEE),
         ('Кешбэк за покупки', domain.TransactionCategory.OTHER),
         ('', domain.TransactionCategory.OTHER),
     ],
@@ -235,3 +268,107 @@ def test_generated_id_survives_posting_of_pending_operation() -> None:
     [posted] = parsing.parse_transactions('savings', [posted_row])
 
     assert pending.transaction_id == posted.transaction_id
+
+
+def test_parse_server_portion_reads_items_and_has_more() -> None:
+    portion = parsing.parse_server_portion(SERVER_PORTION)
+
+    assert portion.has_more is True
+    assert len(portion.items) == 2
+
+
+def test_parse_server_transactions_normalizes_items() -> None:
+    portion = parsing.parse_server_portion(SERVER_PORTION)
+
+    with_bank_id, without_bank_id = parsing.parse_server_transactions('card-debit', portion.items)
+
+    assert with_bank_id == domain.Transaction(
+        transaction_id='tx-c-001',
+        id_source=domain.TransactionIdSource.BANK,
+        product_id='card-debit',
+        operation_date=datetime.date(2026, 5, 3),
+        posting_date=datetime.date(2026, 5, 4),
+        amount=Decimal('-1450.00'),
+        currency='RUB',
+        type=domain.TransactionType.DEBIT,
+        description='Пятёрочка',
+        counterparty='Пятёрочка',
+        category=domain.TransactionCategory.GROCERIES,
+        status=domain.TransactionStatus.POSTED,
+    )
+    assert without_bank_id.id_source == domain.TransactionIdSource.GENERATED
+    assert without_bank_id.transaction_id.endswith('-1')
+    assert without_bank_id.posting_date is None
+    assert without_bank_id.amount == Decimal('640')
+    assert without_bank_id.type == domain.TransactionType.CREDIT
+    assert without_bank_id.category == domain.TransactionCategory.REFUND
+    assert without_bank_id.status == domain.TransactionStatus.PENDING
+
+
+def test_server_and_page_give_same_generated_id_for_same_operation() -> None:
+    server_item = parsing.parse_server_portion(SERVER_PORTION).items[1]
+    page_row = parsing.TransactionRow(
+        bank_id=None,
+        operation_date='28.06.2026',
+        posting_date='—',
+        description='Возврат: Кофейня',
+        counterparty='—',
+        category='Возврат',
+        status='В обработке',
+        amount='+640,00 ₽',
+    )
+
+    [from_server] = parsing.parse_server_transactions('card-debit', [server_item])
+    [from_page] = parsing.parse_transactions('card-debit', [page_row])
+
+    assert from_server == from_page
+
+
+@pytest.mark.parametrize(
+    ('code', 'expected'),
+    [
+        ('POSTED', domain.TransactionStatus.POSTED),
+        ('PENDING', domain.TransactionStatus.PENDING),
+        ('DECLINED', domain.TransactionStatus.DECLINED),
+    ],
+)
+def test_parse_server_status(code: str, expected: domain.TransactionStatus) -> None:
+    assert parsing.parse_server_status(code) == expected
+
+
+def test_parse_server_status_rejects_unknown() -> None:
+    with pytest.raises(ValueError):
+        parsing.parse_server_status('FROZEN')
+
+
+@pytest.mark.parametrize(
+    'broken_item',
+    [
+        {'operationDate': '03.05.2026'},
+        {'amount': '−1 450,00 ₽'},
+        {'currency': 'рубли'},
+    ],
+)
+def test_parse_server_portion_rejects_unknown_format(broken_item: dict[str, object]) -> None:
+    portion = {'items': [CARD_PURCHASE_ITEM | broken_item], 'hasMore': False}
+
+    with pytest.raises(ValueError):
+        parsing.parse_server_portion(portion)
+
+
+@pytest.mark.parametrize(
+    ('url', 'period', 'expected'),
+    [
+        (
+            'http://bank/api/products/card-debit/transactions?offset=5&from=2026-05-01&to=2026-06-30',
+            HISTORY_PERIOD,
+            True,
+        ),
+        ('http://bank/api/products/card-debit/transactions?offset=0', HISTORY_PERIOD, False),
+        ('http://bank/api/products/card-debit/transactions?offset=0', None, True),
+        ('http://bank/api/products/acc-usd/transactions?from=2026-05-01&to=2026-06-30', HISTORY_PERIOD, False),
+        ('http://bank/products/card-debit?from=2026-05-01&to=2026-06-30', HISTORY_PERIOD, False),
+    ],
+)
+def test_is_history_response_url(url: str, period: domain.Period | None, expected: bool) -> None:
+    assert parsing.is_history_response_url(url, 'card-debit', period) == expected

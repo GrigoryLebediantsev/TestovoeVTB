@@ -98,6 +98,12 @@ class DemoBankServer:
         """Переключает режим и сбрасывает сессии входа."""
         post_json(f'{self.base_url}/_test/mode', {'mode': mode})
 
+    def get_api_calls(self) -> list[dict[str, object]]:
+        """Запросы порций истории к серверу банка, записанные демо-банком."""
+        with urllib.request.urlopen(f'{self.base_url}/_test/api-calls', timeout=5) as response:
+            api_calls: list[dict[str, object]] = json.loads(response.read())
+            return api_calls
+
     def program_env(self, client_browser_cdp_url: str, output_dir: Path) -> dict[str, str]:
         return {
             'EXTRACTION__BANK': 'demo_bank',

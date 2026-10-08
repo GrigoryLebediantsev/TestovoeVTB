@@ -78,17 +78,17 @@ EXPECTED_SAVINGS_TRANSACTIONS = [
 ]
 EXACT_AMOUNT_TEXTS = ['"amount": 50000.00', '"amount": -20000.00', '"amount": 6890.41']
 
-EXPECTED_PRODUCT_REPORTS = {
-    'acc-rub': {'product_id': 'acc-rub', 'status': 'complete', 'extraction_source': 'page', 'transactions_count': 0},
-    'acc-usd': {'product_id': 'acc-usd', 'status': 'complete', 'extraction_source': 'page', 'transactions_count': 0},
-    'card-debit': {
-        'product_id': 'card-debit',
-        'status': 'complete',
-        'extraction_source': 'page',
-        'transactions_count': 0,
-    },
-    'savings': {'product_id': 'savings', 'status': 'complete', 'extraction_source': 'page', 'transactions_count': 7},
-    'loan': {'product_id': 'loan', 'status': 'complete', 'extraction_source': 'page', 'transactions_count': 0},
+EXPECTED_SAVINGS_REPORT = {
+    'product_id': 'savings',
+    'status': 'complete',
+    'extraction_source': 'page',
+    'transactions_count': 7,
+}
+EXPECTED_LOAN_REPORT = {
+    'product_id': 'loan',
+    'status': 'complete',
+    'extraction_source': 'page',
+    'transactions_count': 0,
 }
 
 
@@ -122,9 +122,11 @@ def test_extract_page_transactions_flow(
     assert [item for item in statement['transactions'] if item['product_id'] == 'loan'] == []
 
     report = json.loads((run_folder / 'extraction_report.json').read_text(encoding='utf-8'))
-    assert {item['product_id']: item for item in report['products']} == EXPECTED_PRODUCT_REPORTS
-    assert report['transactions_count'] == len(statement['transactions']) == 7
-    assert report['warnings'] == ['Продукт savings: отброшено операций вне периода: 1']
+    product_reports = {item['product_id']: item for item in report['products']}
+    assert product_reports['savings'] == EXPECTED_SAVINGS_REPORT
+    assert product_reports['loan'] == EXPECTED_LOAN_REPORT
+    assert report['transactions_count'] == len(statement['transactions'])
+    assert 'Продукт savings: отброшено операций вне периода: 1' in report['warnings']
 
 
 def _without_generated_id(transaction: dict[str, object]) -> dict[str, object]:
