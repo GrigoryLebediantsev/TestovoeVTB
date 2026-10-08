@@ -55,11 +55,11 @@ class ReferenceStatement:
         return self.period.date_from <= period.date_from and period.date_to <= self.period.date_to
 
     def transactions_in(self, period: Period) -> list[ComparableTransaction]:
-        """Эталонные операции периода по правилу выписки: по дате проведения, без неё — по дате операции."""
+        """Эталонные операции периода по тому же правилу, что и в выписке."""
         return [
             transaction
             for transaction in self.transactions
-            if period.contains(transaction.posting_date or transaction.operation_date)
+            if period.contains_transaction_dates(transaction.operation_date, transaction.posting_date)
         ]
 
 

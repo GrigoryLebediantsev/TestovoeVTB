@@ -44,6 +44,7 @@ class DemoBankMode(enum.StrEnum):
     LOAD_ERROR = 'load_error'
     SLOW = 'slow'
     EMPTY = 'empty'  # у продуктов нет операций
+    NO_PERIOD_FILTER = 'no_period_filter'  # в истории продукта нет фильтра периода
 
 
 @dataclass
@@ -76,6 +77,7 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
         return CabinetView(
             value_format=current_value_format(),
             table_markup=CHANGED_TABLE_MARKUP if is_layout_changed else TableMarkup(),
+            has_period_filter=state.mode != DemoBankMode.NO_PERIOD_FILTER,
         )
 
     def find_product(product_id: str) -> DemoProduct | None:

@@ -22,3 +22,4 @@ CHANGED_TABLE_MARKUP = TableMarkup(row_class='operation', cell_class_prefix='ope
 class CabinetView:
     value_format: ValueFormat = field(default_factory=ValueFormat)
     table_markup: TableMarkup = field(default_factory=TableMarkup)
+    has_period_filter: bool = True
