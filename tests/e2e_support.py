@@ -6,13 +6,14 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from playwright.sync_api import BrowserContext, Page, expect
+from playwright.sync_api import BrowserContext, Page, Playwright, expect
 
 from demo_bank.data import PRODUCTS
 
@@ -136,6 +137,8 @@ def start_client_chromium(executable_path: str, profile_dir: Path) -> tuple[subp
         [
             executable_path,
             '--headless=new',
+            # Как у браузера, который запускает сам Playwright: в Docker песочнице Chromium не хватает прав
+            '--no-sandbox',
             f'--remote-debugging-port={port}',
             f'--user-data-dir={profile_dir}',
             '--no-first-run',
@@ -148,6 +151,19 @@ def start_client_chromium(executable_path: str, profile_dir: Path) -> tuple[subp
     cdp_url = f'http://127.0.0.1:{port}'
     wait_for(lambda: is_url_available(f'{cdp_url}/json/version'), STARTUP_TIMEOUT_SECONDS, 'client chromium')
     return process, cdp_url
+
+
+@contextmanager
+def open_client_browser(playwright: Playwright, profile_dir: Path) -> Iterator[ClientBrowser]:
+    """Chrome клиента без окна на время блока; после блока процесс браузера останавливается."""
+    process, cdp_url = start_client_chromium(playwright.chromium.executable_path, profile_dir)
+    browser = playwright.chromium.connect_over_cdp(cdp_url)
+    try:
+        yield ClientBrowser(cdp_url=cdp_url, context=browser.contexts[0])
+    finally:
+        browser.close()
+        process.terminate()
+        process.wait(timeout=10)
 
 
 def find_page_with_title(context: BrowserContext, title: str) -> Page | None:

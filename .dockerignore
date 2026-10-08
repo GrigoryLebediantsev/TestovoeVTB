@@ -1,0 +1,17 @@
+# Окружение и настройки с машины разработчика
+.venv/
+.env
+.env.*
+
+# Служебное
+.git/
+.idea/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Результаты запусков и локальные документы
+output/
+architecture.md
+*.docx

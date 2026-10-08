@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Playwright, sync_playwright
 
-from tests.e2e_support import ClientBrowser, DemoBankServer, start_client_chromium
+from tests.e2e_support import ClientBrowser, DemoBankServer, open_client_browser
 
 
 @pytest.fixture(scope='session')
@@ -30,9 +30,5 @@ def playwright() -> Iterator[Playwright]:
 
 @pytest.fixture
 def client_browser(playwright: Playwright, tmp_path: Path) -> Iterator[ClientBrowser]:
-    process, cdp_url = start_client_chromium(playwright.chromium.executable_path, tmp_path / 'client-profile')
-    browser = playwright.chromium.connect_over_cdp(cdp_url)
-    yield ClientBrowser(cdp_url=cdp_url, context=browser.contexts[0])
-    browser.close()
-    process.terminate()
-    process.wait(timeout=10)
+    with open_client_browser(playwright, tmp_path / 'client-profile') as client_browser:
+        yield client_browser
