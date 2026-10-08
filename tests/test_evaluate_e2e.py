@@ -41,7 +41,7 @@ def test_evaluate_missing_file_flow(tmp_path: Path) -> None:
     result = run_program(NO_SETTINGS, tmp_path, arguments=['evaluate', missing_path])
 
     assert result.returncode == EXIT_FAILED, result.output
-    assert f'Оценка не выполнена: Файл не найден: {missing_path}' in result.output
+    assert f'Оценка не выполнена: Не найдена выписка запуска или её отчёт: {missing_path}' in result.output
 
 
 def test_evaluate_empty_folder_flow(tmp_path: Path) -> None:
@@ -52,7 +52,23 @@ def test_evaluate_empty_folder_flow(tmp_path: Path) -> None:
 
     assert result.returncode == EXIT_FAILED, result.output
     # В сообщении путь, который ввёл человек
-    assert result.output.rstrip().endswith(f'Оценка не выполнена: Файл не найден: {empty_folder}')
+    assert result.output.rstrip().endswith(
+        f'Оценка не выполнена: Не найдена выписка запуска или её отчёт: {empty_folder}'
+    )
+
+
+def test_evaluate_statement_without_report_flow(tmp_path: Path) -> None:
+    run_folder = tmp_path / 'run'
+    run_folder.mkdir()
+    statement_path = run_folder / 'statement.json'
+    statement_path.write_text(json.dumps(JULY_STATEMENT), encoding='utf-8')
+
+    result = run_program(NO_SETTINGS, tmp_path, arguments=['evaluate', str(statement_path)])
+
+    assert result.returncode == EXIT_FAILED, result.output
+    # Файл выписки есть, не хватает отчёта рядом: сообщение не называет выписку отсутствующей
+    assert f'Оценка не выполнена: Не найдена выписка запуска или её отчёт: {statement_path}' in result.output
+    assert 'Файл не найден' not in result.output
 
 
 def test_evaluate_missing_reference_flow(

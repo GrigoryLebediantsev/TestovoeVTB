@@ -60,7 +60,7 @@ class StatementFiles(typing.Protocol):
     async def read_extracted_statement(self, path: str) -> domain.ExtractedStatement | None:
         """Выписка запуска: папка результата или statement.json; предупреждения — из extraction_report.json рядом.
 
-        Нет файла — None, файл не той формы — domain.EvaluationFileInvalid.
+        Нет выписки или отчёта — None, файл не той формы — domain.EvaluationFileInvalid.
         """
         ...
 
