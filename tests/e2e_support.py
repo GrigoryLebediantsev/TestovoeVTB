@@ -27,10 +27,19 @@ DEMO_LOGIN = 'demo'
 DEMO_PASSWORD = 'demo'
 DEMO_ONE_TIME_CODE = '0000'
 
+# Период запуска прототипа на демо-банке и число операций выписки за него в обычном режиме
+DEMO_PERIOD_FROM = '2026-05-01'
+DEMO_PERIOD_TO = '2026-06-30'
+NORMAL_MODE_TRANSACTIONS_COUNT = 41
+
+# Заголовки страниц прототипа, которые клиент видит в браузере
+SUMMARY_PAGE_TITLE = 'Выписка сформирована'
+FAILURE_PAGE_TITLE = 'Выписка не сформирована'
+
 EXIT_COMPLETE = 0
 EXIT_FAILED = 1
 # Код завершения: выписка сохранена, есть предупреждения. В обычном режиме демо-банка они есть всегда:
-# дубликаты операций карты и операции вне периода
+# дубликаты операций карты
 EXIT_WITH_WARNINGS = 2
 
 
@@ -118,8 +127,8 @@ class DemoBankServer:
     def program_env(self, client_browser_cdp_url: str, output_dir: Path) -> dict[str, str]:
         return {
             'EXTRACTION__BANK': 'demo_bank',
-            'EXTRACTION__PERIOD_FROM': '2026-05-01',
-            'EXTRACTION__PERIOD_TO': '2026-06-30',
+            'EXTRACTION__PERIOD_FROM': DEMO_PERIOD_FROM,
+            'EXTRACTION__PERIOD_TO': DEMO_PERIOD_TO,
             'DEMO_BANK__BASE_URL': self.base_url,
             'BROWSER__MODE': 'cdp',
             'BROWSER__CDP_URL': client_browser_cdp_url,

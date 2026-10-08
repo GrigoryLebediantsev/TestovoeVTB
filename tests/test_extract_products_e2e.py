@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 
 from tests.e2e_support import (
+    DEMO_PERIOD_FROM,
+    DEMO_PERIOD_TO,
     EXIT_WITH_WARNINGS,
     ClientBrowser,
     DemoBankServer,
@@ -9,9 +11,6 @@ from tests.e2e_support import (
     give_consent_and_log_in,
     start_program,
 )
-
-PERIOD_FROM = '2026-05-01'
-PERIOD_TO = '2026-06-30'
 
 EXPECTED_PRODUCTS = {
     'acc-rub': {
@@ -106,9 +105,7 @@ EXACT_AMOUNT_TEXTS = ['"balance": 125430.50', '"available_balance": 120430.50', 
 def test_extract_products_flow(demo_bank: DemoBankServer, client_browser: ClientBrowser, tmp_path: Path) -> None:
     output_dir = tmp_path / 'output'
     env = demo_bank.program_env(client_browser_cdp_url=client_browser.cdp_url, output_dir=output_dir)
-    process = start_program(
-        env | {'EXTRACTION__PERIOD_FROM': PERIOD_FROM, 'EXTRACTION__PERIOD_TO': PERIOD_TO}, tmp_path
-    )
+    process = start_program(env, tmp_path)
 
     give_consent_and_log_in(client_browser.context, expected_consent_texts=CONSENT_PAGE_TEXTS)
     result = finish_program(process)
@@ -122,13 +119,13 @@ def test_extract_products_flow(demo_bank: DemoBankServer, client_browser: Client
         assert amount_text in statement_text
     statement = json.loads(statement_text)
     assert statement['bank'] == 'demo_bank'
-    assert statement['period'] == {'from': PERIOD_FROM, 'to': PERIOD_TO}
+    assert statement['period'] == {'from': DEMO_PERIOD_FROM, 'to': DEMO_PERIOD_TO}
     assert statement['extracted_at'].endswith('Z') or statement['extracted_at'].endswith('+00:00')
     assert {product['product_id']: product for product in statement['products']} == EXPECTED_PRODUCTS
 
     report = json.loads((run_folder / 'extraction_report.json').read_text(encoding='utf-8'))
     assert report['bank'] == 'demo_bank'
-    assert report['period'] == {'from': PERIOD_FROM, 'to': PERIOD_TO}
+    assert report['period'] == {'from': DEMO_PERIOD_FROM, 'to': DEMO_PERIOD_TO}
     assert report['consent']['granted_at']
     assert report['consent']['scope']
     assert report['products_count'] == 5

@@ -264,11 +264,7 @@ def parse_export_amount(text: str) -> Decimal:
     match = EXPORT_AMOUNT_PATTERN.match(text.strip())
     if not match:
         raise ValueError('Unknown export amount format')
-    number = match['integer']
-    if match['fraction']:
-        number = f'{number}.{match["fraction"]}'
-    amount = Decimal(number)
-    return -amount if match['sign'] else amount
+    return _build_amount(match)
 
 
 def parse_export_transactions(product_id: str, content: bytes) -> domain.TransactionHistory:

@@ -1,7 +1,7 @@
 # Схема выходных данных
 
 Каждый запуск пишет файлы в папку `output/<банк>_<ГГГГММДД-ЧЧММСС>/` (время запуска в UTC). Какие файлы выписки
-писать, задаёт `STORAGE__FORMAT`; отчёт о полноте пишется всегда.
+писать, задаёт `EXTRACTION__FORMAT`; отчёт о полноте пишется всегда.
 
 | Файл                     | Формат `json` | Формат `csv` | Формат `both` |
 |--------------------------|:-------------:|:------------:|:-------------:|
@@ -50,6 +50,10 @@
 | `details.opened_at`     | дата или `null`                         | Дата открытия                                               |
 | `details.credit_limit`  | сумма или `null`                        | Кредитный лимит                                             |
 | `details.debt`          | сумма или `null`                        | Остаток долга по кредиту                                    |
+
+У кредита `balance` и `available_balance` — `null`, а сумма долга лежит в `details.debt`. Остаток — это деньги
+клиента на продукте, а долг — деньги банка: если записать долг в `balance`, сумма остатков по всем продуктам
+смешала бы одно с другим.
 
 Полный номер карты не сохраняется нигде. ФИО клиента не извлекается.
 
@@ -108,7 +112,7 @@ product_id,type,name,masked_number,currency,balance,available_balance,linked_acc
 | `products[].extraction_source`  | `export` / `server_response` / `page` или `null` | Способ, которым получена история |
 | `products[].transactions_count` | число           | Операций продукта в выписке                                      |
 | `products[].reason`             | строка или `null` | Почему продукт извлечён не полностью или не извлечён           |
-| `warnings`           | список строк               | Предупреждения: дубликаты, операции вне периода, незнакомые статусы, повторные попытки, недоступный экспорт, нет фильтра периода |
+| `warnings`           | список строк               | Предупреждения: дубликаты, операции вне периода, незнакомые статусы, повторные попытки, недоступный экспорт, нет фильтра периода, нарушения согласованности выписки |
 | `errors`             | список строк               | Ошибки: продукты, карточку или историю которых получить не удалось |
 
 В отчёте только идентификаторы продуктов и операций, маскированные номера и количества: ни сумм, ни описаний,
@@ -261,7 +265,7 @@ product_id,type,name,masked_number,currency,balance,available_balance,linked_acc
     ]
   },
   "products_count": 5,
-  "transactions_count": 40,
+  "transactions_count": 41,
   "duration_seconds": 1.6,
   "products": [
     {
@@ -285,12 +289,11 @@ product_id,type,name,masked_number,currency,balance,available_balance,linked_acc
       "masked_number": "**** 1234",
       "status": "complete",
       "extraction_source": "page",
-      "transactions_count": 7,
+      "transactions_count": 8,
       "reason": null
     }
   ],
   "warnings": [
-    "Продукт savings: отброшено операций вне периода: 1",
     "Продукт card-debit: операция c-001 совпадает с операцией ef5888f8a27676d8-1 продукта acc-rub"
   ],
   "errors": []

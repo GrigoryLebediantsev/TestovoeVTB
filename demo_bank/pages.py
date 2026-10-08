@@ -293,14 +293,17 @@ def _transactions_section(
             f'<p><a class="export-csv" href="/products/{escape(product.product_id)}/export.csv?{export_query}">'
             'Скачать выписку CSV</a></p>'
         )
-    return f"""<section class="transactions" data-testid="transactions" data-state="{state}"
-  data-product-id="{escape(product.product_id)}">
-<h2>Операции</h2>
-<form class="period-filter" method="get">
+    period_filter = ''
+    if view.has_period_filter:
+        period_filter = f"""<form class="period-filter" method="get">
   <label>С <input name="from" type="date" value="{from_value}"></label>
   <label>По <input name="to" type="date" value="{to_value}"></label>
   <button type="submit">Показать</button>
-</form>
+</form>"""
+    return f"""<section class="transactions" data-testid="transactions" data-state="{state}"
+  data-product-id="{escape(product.product_id)}">
+<h2>Операции</h2>
+{period_filter}
 {export_link}
 {history}
 </section>"""

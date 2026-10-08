@@ -12,7 +12,11 @@ log = logging.getLogger(__name__)
 async def evaluate_statement(self: EvaluationUsecase, input: dto.EvaluateStatementInput) -> dto.EvaluateStatementOutput:
     """Сравнивает выписку запуска с эталонной: эталон берётся только за период выписки."""
     extracted = await self.statement_files.read_extracted_statement(input.statement_path)
+    if extracted is None:
+        raise domain.ExtractedStatementNotFound(input.statement_path)
     reference = await self.statement_files.read_reference_statement(input.reference_path)
+    if reference is None:
+        raise domain.EvaluationFileNotFound(input.reference_path)
     if not reference.covers(extracted.period):
         raise domain.ReferencePeriodNotCovered()
 

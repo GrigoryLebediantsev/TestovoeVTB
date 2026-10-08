@@ -11,9 +11,6 @@ from tests.e2e_support import (
     start_program,
 )
 
-PERIOD_FROM = '2026-05-01'
-PERIOD_TO = '2026-06-30'
-
 GENERATED_ID_PATTERN = re.compile(r'^[0-9a-f]{16}-\d+$')
 
 
@@ -45,9 +42,10 @@ def savings_transaction(
     }
 
 
-# Кабинет фильтрует по дате проведения: операция 30.04, проведённая 01.05, приходит из кабинета,
-# но прототип отбрасывает её как совершённую вне периода. Операция 15.03 отсекается фильтром кабинета.
+# Период — по дате проведения, как у фильтра кабинета: операция 30.04, проведённая 01.05, в выписке.
+# Операция 15.03 отсекается фильтром кабинета.
 EXPECTED_SAVINGS_TRANSACTIONS = [
+    savings_transaction('2026-04-30', '2026-05-01', 6712.33, 'Выплата процентов за апрель', None, 'interest', 'posted'),
     savings_transaction(
         '2026-05-05',
         '2026-05-05',
@@ -90,7 +88,7 @@ EXPECTED_SAVINGS_REPORT = {
     'masked_number': '**** 1234',
     'status': 'complete',
     'extraction_source': 'page',
-    'transactions_count': 7,
+    'transactions_count': 8,
     'reason': None,
 }
 EXPECTED_LOAN_REPORT = {
@@ -108,9 +106,7 @@ def test_extract_page_transactions_flow(
 ) -> None:
     output_dir = tmp_path / 'output'
     env = demo_bank.program_env(client_browser_cdp_url=client_browser.cdp_url, output_dir=output_dir)
-    process = start_program(
-        env | {'EXTRACTION__PERIOD_FROM': PERIOD_FROM, 'EXTRACTION__PERIOD_TO': PERIOD_TO}, tmp_path
-    )
+    process = start_program(env, tmp_path)
 
     give_consent_and_log_in(client_browser.context, expected_consent_texts=[])
     result = finish_program(process)
@@ -137,7 +133,7 @@ def test_extract_page_transactions_flow(
     assert product_reports['savings'] == EXPECTED_SAVINGS_REPORT
     assert product_reports['loan'] == EXPECTED_LOAN_REPORT
     assert report['transactions_count'] == len(statement['transactions'])
-    assert 'Продукт savings: отброшено операций вне периода: 1' in report['warnings']
+    assert not any('отброшено операций вне периода' in warning for warning in report['warnings'])
 
 
 def _without_generated_id(transaction: dict[str, object]) -> dict[str, object]:

@@ -3,8 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from src.adapter.browser_window import SUMMARY_PAGE_TITLE
-from tests.e2e_support import EXIT_WITH_WARNINGS, PROGRAM_TIMEOUT_SECONDS, REPO_ROOT
+from tests.e2e_support import EXIT_WITH_WARNINGS, PROGRAM_TIMEOUT_SECONDS, REPO_ROOT, SUMMARY_PAGE_TITLE
 
 SAVED_TEXT = 'Выписка сохранена'
 FULL_RECALL_TEXT = 'Полнота (recall): 1.000'
@@ -24,7 +23,7 @@ def test_headless_demo_flow(tmp_path: Path) -> None:
     )
     output = result.stdout + result.stderr
 
-    # В обычном режиме демо-банка всегда есть предупреждения: дубликаты операций карты и операции вне периода
+    # В обычном режиме демо-банка всегда есть предупреждения: дубликаты операций карты
     assert result.returncode == EXIT_WITH_WARNINGS, output
     assert SAVED_TEXT in output
     # Текст итоговой страницы, которую клиент видит в браузере

@@ -16,16 +16,29 @@ EXIT_WITH_WARNINGS = 2  # выписка сохранена, но есть пр�
 
 EVALUATE_COMMAND = 'evaluate'
 METRIC_DIGITS = 3
+LOG_LEVELS = ('DEBUG', 'INFO', 'WARNING', 'ERROR')
 
 
 @dataclass
 class LaunchDefaults:
-    """Параметры запуска из .env; аргументы командной строки переопределяют период."""
+    """Параметры запуска из .env; аргументы командной строки их переопределяют."""
 
     bank: str
     period_from: datetime.date
     period_to: datetime.date
     format: domain.StatementFormat
+    is_own_browser: bool  # прототип запускает свой браузер, а не подключается к открытому (CDP)
+    profile_dir: str | None
+    log_level: str
+
+
+@dataclass
+class LaunchInput:
+    """Вход сценария и настройки запуска, которые main.py применяет до открытия браузера."""
+
+    extraction_input: dto.ExtractStatementInput
+    profile_dir: str | None
+    log_level: str
 
 
 class InvalidArgumentsError(Exception): ...
@@ -50,6 +63,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--to', dest='period_to', type=_parse_date, help='Конец периода, ГГГГ-ММ-ДД (по умолчанию из .env)'
     )
+    parser.add_argument('--profile-dir', help='Папка постоянного профиля собственного браузера (по умолчанию из .env)')
+    parser.add_argument(
+        '--format',
+        # Строки, а не перечисление: так при ошибке argparse перечислит допустимые значения
+        choices=[statement_format.value for statement_format in domain.StatementFormat],
+        help='Файлы выписки: json, csv или both (по умолчанию из .env)',
+    )
+    parser.add_argument('--log-level', choices=LOG_LEVELS, help='Уровень лога (по умолчанию из .env)')
     return parser
 
 
@@ -99,15 +120,22 @@ async def run_evaluation(evaluation_input: dto.EvaluateStatementInput) -> int:
     return EXIT_COMPLETE
 
 
-def parse_input(arguments: list[str], defaults: LaunchDefaults) -> dto.ExtractStatementInput | None:
-    """Вход сценария: период из аргументов или .env. Неверные параметры — сообщение оператору и None."""
+def parse_input(arguments: list[str], defaults: LaunchDefaults) -> LaunchInput | None:
+    """Параметры запуска из аргументов или .env. Неверные параметры — сообщение оператору и None."""
     try:
         parsed = build_parser().parse_args(arguments)
-        return dto.ExtractStatementInput(
+        if parsed.profile_dir and not defaults.is_own_browser:
+            raise InvalidArgumentsError('--profile-dir работает только с собственным браузером (BROWSER__MODE=launch)')
+        extraction_input = dto.ExtractStatementInput(
             bank=defaults.bank,
             period_from=parsed.period_from or defaults.period_from,
             period_to=parsed.period_to or defaults.period_to,
-            format=defaults.format,
+            format=domain.StatementFormat(parsed.format) if parsed.format else defaults.format,
+        )
+        return LaunchInput(
+            extraction_input=extraction_input,
+            profile_dir=parsed.profile_dir or defaults.profile_dir,
+            log_level=parsed.log_level or defaults.log_level,
         )
     except InvalidArgumentsError as error:
         message = str(error)

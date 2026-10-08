@@ -53,6 +53,8 @@ async def _extract_and_save(self: Usecase, input: dto.ExtractStatementInput) -> 
         warnings.extend(product_extraction.warnings)
         errors.extend(product_extraction.errors)
     warnings.extend(_mark_card_duplicates(products, transactions))
+    consistency_problems = domain.check_statement_consistency(products, transactions)
+    warnings.extend(_describe_consistency_problems(consistency_problems))
     extracted_at = datetime.datetime.now(datetime.UTC)
     duration_seconds = round((extracted_at - started_at).total_seconds(), DURATION_PRECISION_DIGITS)
 
@@ -190,4 +192,24 @@ def _mark_card_duplicates(products: list[domain.Product], transactions: list[dom
             f'продукта {pair.account_transaction.product_id}'
         )
     log.info('Card duplicates marked', extra={'duplicates_count': len(pairs)})
+    return warnings
+
+
+def _describe_consistency_problems(problems: domain.ConsistencyProblems) -> list[str]:
+    """Предупреждения о нарушениях согласованности выписки: данные сохраняются, но им стоит не доверять слепо."""
+    warnings = [
+        f'Операция {transaction_id} встречается в выписке несколько раз'
+        for transaction_id in problems.repeated_transaction_ids
+    ]
+    for transaction in problems.currency_mismatches:
+        warnings.append(
+            f'Продукт {transaction.product_id}: валюта операции {transaction.transaction_id} '
+            f'({transaction.currency}) не совпадает с валютой продукта'
+        )
+    for product in problems.missing_linked_accounts:
+        warnings.append(
+            f'Продукт {product.product_id}: привязанный счёт {product.linked_account_id} не найден в выписке'
+        )
+    if not problems.is_empty():
+        log.warning('Statement consistency problems found', extra={'problems_count': len(warnings)})
     return warnings

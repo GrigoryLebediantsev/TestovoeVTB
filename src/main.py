@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from shared import logger
+from shared.browser_base import BrowserMode
 from shared.config_helper import load_settings
 from shared.logger import LoggerConfig
 from src import deps
@@ -30,13 +31,18 @@ async def run_extraction(arguments: list[str]) -> int:
         bank=settings.extraction.BANK,
         period_from=settings.extraction.PERIOD_FROM,
         period_to=settings.extraction.PERIOD_TO,
-        format=settings.storage.FORMAT,
+        format=settings.extraction.FORMAT,
+        is_own_browser=settings.browser.MODE == BrowserMode.LAUNCH,
+        profile_dir=settings.browser.PROFILE_DIR,
+        log_level=settings.logger.LEVEL,
     )
-    extraction_input = cli.parse_input(arguments, launch_defaults)
-    if extraction_input is None:
+    launch_input = cli.parse_input(arguments, launch_defaults)
+    if launch_input is None:
         return cli.EXIT_FAILED
 
-    browser_window = BrowserWindow(settings.browser)
+    # Уровень лога мог прийти из аргументов: лог настраивается заново
+    logger.init(settings.logger.model_copy(update={'LEVEL': launch_input.log_level}))
+    browser_window = BrowserWindow(settings.browser.model_copy(update={'PROFILE_DIR': launch_input.profile_dir}))
     usecase = Usecase(
         bank=create_bank(settings, browser_window),
         client_window=browser_window,
@@ -51,7 +57,7 @@ async def run_extraction(arguments: list[str]) -> int:
         return cli.EXIT_FAILED
 
     try:
-        return await cli.run(extraction_input)
+        return await cli.run(launch_input.extraction_input)
     finally:
         await browser_window.close()
 

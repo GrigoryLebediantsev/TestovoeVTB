@@ -5,16 +5,16 @@ from pathlib import Path
 import pytest
 
 from tests.e2e_support import (
+    DEMO_PERIOD_FROM,
+    DEMO_PERIOD_TO,
     EXIT_WITH_WARNINGS,
+    NORMAL_MODE_TRANSACTIONS_COUNT,
     ClientBrowser,
     DemoBankServer,
     finish_program,
     give_consent_and_log_in,
     start_program,
 )
-
-PERIOD_FROM = '2026-05-01'
-PERIOD_TO = '2026-06-30'
 
 EXPECTED_FILES_BY_FORMAT = {
     'json': ['extraction_report.json', 'statement.json'],
@@ -160,7 +160,6 @@ EXPECTED_TRANSACTION_ROWS = {
         'is_duplicate': 'false',
     },
 }
-EXPECTED_TRANSACTIONS_COUNT = 40
 
 EXPECTED_PRODUCT_REPORTS = [
     {
@@ -192,7 +191,7 @@ EXPECTED_PRODUCT_REPORTS = [
         'masked_number': '**** 1234',
         'status': 'complete',
         'extraction_source': 'page',
-        'transactions_count': 7,
+        'transactions_count': 8,
         'reason': None,
     },
     {
@@ -205,7 +204,6 @@ EXPECTED_PRODUCT_REPORTS = [
     },
 ]
 EXPECTED_REPORT_WARNINGS = [
-    'Продукт savings: отброшено операций вне периода: 1',
     'Продукт card-debit: операция c-001 совпадает с операцией',
 ]
 
@@ -228,15 +226,7 @@ def test_statement_formats_flow(
 ) -> None:
     output_dir = tmp_path / 'output'
     env = demo_bank.program_env(client_browser_cdp_url=client_browser.cdp_url, output_dir=output_dir)
-    process = start_program(
-        env
-        | {
-            'EXTRACTION__PERIOD_FROM': PERIOD_FROM,
-            'EXTRACTION__PERIOD_TO': PERIOD_TO,
-            'STORAGE__FORMAT': statement_format,
-        },
-        tmp_path,
-    )
+    process = start_program(env | {'EXTRACTION__FORMAT': statement_format}, tmp_path)
 
     give_consent_and_log_in(client_browser.context, expected_consent_texts=[])
     result = finish_program(process)
@@ -263,7 +253,7 @@ def _check_csv_tables(run_folder: Path) -> None:
 
     transaction_columns, transaction_rows = _read_csv(run_folder / 'transactions.csv')
     assert transaction_columns == EXPECTED_TRANSACTION_COLUMNS
-    assert len(transaction_rows) == EXPECTED_TRANSACTIONS_COUNT
+    assert len(transaction_rows) == NORMAL_MODE_TRANSACTIONS_COUNT
     transactions_by_id = {row['transaction_id']: row for row in transaction_rows}
     for transaction_id, expected_row in EXPECTED_TRANSACTION_ROWS.items():
         assert transactions_by_id[transaction_id] == expected_row
@@ -286,12 +276,12 @@ def _check_report(run_folder: Path) -> None:
 
     report = json.loads(report_text)
     assert report['bank'] == 'demo_bank'
-    assert report['period'] == {'from': PERIOD_FROM, 'to': PERIOD_TO}
+    assert report['period'] == {'from': DEMO_PERIOD_FROM, 'to': DEMO_PERIOD_TO}
     assert report['consent']['granted_at']
     assert 'Операции за выбранный период' in report['consent']['scope']
     assert report['products'] == EXPECTED_PRODUCT_REPORTS
     assert report['products_count'] == len(EXPECTED_PRODUCT_REPORTS)
-    assert report['transactions_count'] == EXPECTED_TRANSACTIONS_COUNT
+    assert report['transactions_count'] == NORMAL_MODE_TRANSACTIONS_COUNT
     for expected_warning in EXPECTED_REPORT_WARNINGS:
         assert any(warning.startswith(expected_warning) for warning in report['warnings'])
     assert report['errors'] == []

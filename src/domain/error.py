@@ -61,6 +61,12 @@ class EvaluationFileNotFound(NotFoundError):
         super().__init__(f'Файл не найден: {path}')
 
 
+class ExtractedStatementNotFound(NotFoundError):
+    # Выписка запуска — это два файла: путь, который ввёл человек, мог указывать на тот, что есть
+    def __init__(self, path: str) -> None:
+        super().__init__(f'Не найдена выписка запуска или её отчёт: {path}')
+
+
 class EvaluationFileInvalid(ValidationFailedError):
     def __init__(self, path: str) -> None:
         super().__init__(f'Файл не похож на выписку прототипа: {path}')

@@ -2,13 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.e2e_support import EXIT_FAILED, run_program
+from tests.e2e_support import DEMO_PERIOD_FROM, DEMO_PERIOD_TO, EXIT_FAILED, run_program
 
 # Браузер и демо-банк не нужны: неверные параметры отклоняются до открытия браузера
 VALID_ENV = {
     'EXTRACTION__BANK': 'demo_bank',
-    'EXTRACTION__PERIOD_FROM': '2026-05-01',
-    'EXTRACTION__PERIOD_TO': '2026-06-30',
+    'EXTRACTION__PERIOD_FROM': DEMO_PERIOD_FROM,
+    'EXTRACTION__PERIOD_TO': DEMO_PERIOD_TO,
     'DEMO_BANK__BASE_URL': 'http://127.0.0.1:9',
     'BROWSER__MODE': 'cdp',
     'BROWSER__CDP_URL': 'http://127.0.0.1:9',
@@ -23,8 +23,19 @@ VALID_ENV = {
         (['--from', '2026-07-01'], {}, 'Начало периода позже конца'),
         ([], {'EXTRACTION__PERIOD_FROM': '2026-07-01'}, 'Начало периода позже конца'),
         (['--unknown'], {}, 'Неверные параметры запуска'),
+        (['--format', 'xml'], {}, 'choose from json, csv, both'),
+        (['--log-level', 'LOUD'], {}, 'choose from DEBUG, INFO, WARNING, ERROR'),
+        (['--profile-dir', 'profile'], {}, '--profile-dir работает только с собственным браузером'),
     ],
-    ids=['not a date', 'from after to', 'env from after to', 'unknown argument'],
+    ids=[
+        'not a date',
+        'from after to',
+        'env from after to',
+        'unknown argument',
+        'unknown format',
+        'unknown log level',
+        'profile dir with cdp',
+    ],
 )
 def test_invalid_arguments_flow(
     arguments: list[str], env_override: dict[str, str], expected_message: str, tmp_path: Path
