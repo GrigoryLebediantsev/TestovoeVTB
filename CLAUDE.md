@@ -1,3 +1,7 @@
+## Architecture
+
+All code must follow the architecture, structure and code style described in `architecture.md` at the repo root (local file, intentionally not tracked in git). Deliberate deviations are recorded in `docs/adr/`.
+
 ## Agent skills
 
 ### Issue tracker
