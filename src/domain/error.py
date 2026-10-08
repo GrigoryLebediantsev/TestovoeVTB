@@ -25,3 +25,25 @@ class LoginTimeout(AccessDeniedError):
 class ProductsNotLoaded(ExternalServiceError):
     def __init__(self) -> None:
         super().__init__('Не удалось загрузить список продуктов')
+
+
+# Ошибки одного продукта: продукт помечается в отчёте, остальные извлекаются дальше.
+# Текст — причина в отчёте, без значений из кабинета.
+class ProductDetailsNotLoaded(ExternalServiceError):
+    def __init__(self) -> None:
+        super().__init__('карточка продукта не загружена')
+
+
+class TransactionsNotLoaded(ExternalServiceError):
+    def __init__(self) -> None:
+        super().__init__('история операций не загружена')
+
+
+class TransactionsFormatNotRecognized(ExternalServiceError):
+    def __init__(self) -> None:
+        super().__init__('формат истории операций не распознан')
+
+
+class TransactionsLayoutNotRecognized(ExternalServiceError):
+    def __init__(self) -> None:
+        super().__init__('разметка истории операций не распознана')

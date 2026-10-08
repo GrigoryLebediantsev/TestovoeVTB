@@ -169,6 +169,7 @@ EXPECTED_PRODUCT_REPORTS = [
         'status': 'complete',
         'extraction_source': 'export',
         'transactions_count': 9,
+        'reason': None,
     },
     {
         'product_id': 'acc-usd',
@@ -176,6 +177,7 @@ EXPECTED_PRODUCT_REPORTS = [
         'status': 'complete',
         'extraction_source': 'server_response',
         'transactions_count': 12,
+        'reason': None,
     },
     {
         'product_id': 'card-debit',
@@ -183,6 +185,7 @@ EXPECTED_PRODUCT_REPORTS = [
         'status': 'complete',
         'extraction_source': 'server_response',
         'transactions_count': 12,
+        'reason': None,
     },
     {
         'product_id': 'savings',
@@ -190,6 +193,7 @@ EXPECTED_PRODUCT_REPORTS = [
         'status': 'complete',
         'extraction_source': 'page',
         'transactions_count': 7,
+        'reason': None,
     },
     {
         'product_id': 'loan',
@@ -197,6 +201,7 @@ EXPECTED_PRODUCT_REPORTS = [
         'status': 'complete',
         'extraction_source': 'page',
         'transactions_count': 0,
+        'reason': None,
     },
 ]
 EXPECTED_REPORT_WARNINGS = [

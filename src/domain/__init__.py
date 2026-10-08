@@ -7,7 +7,11 @@ from .error import (
     DomainError,
     ExternalServiceError,
     LoginTimeout,
+    ProductDetailsNotLoaded,
     ProductsNotLoaded,
+    TransactionsFormatNotRecognized,
+    TransactionsLayoutNotRecognized,
+    TransactionsNotLoaded,
 )
 from .masking import mask_number
 from .period import Period
@@ -44,6 +48,7 @@ __all__ = [
     'PeriodSplit',
     'Product',
     'ProductDetails',
+    'ProductDetailsNotLoaded',
     'ProductExtractionStatus',
     'ProductReport',
     'ProductRequisites',
@@ -56,6 +61,9 @@ __all__ = [
     'TransactionHistory',
     'TransactionIdGenerator',
     'TransactionIdSource',
+    'TransactionsFormatNotRecognized',
+    'TransactionsLayoutNotRecognized',
+    'TransactionsNotLoaded',
     'TransactionStatus',
     'TransactionType',
     'build_run_folder_name',

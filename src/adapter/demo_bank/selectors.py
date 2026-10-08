@@ -34,6 +34,10 @@ PERIOD_FILTER_SUBMIT = '.period-filter button[type="submit"]'
 TRANSACTIONS_SECTION = '[data-testid="transactions"]'
 TRANSACTION_ROW = '[data-testid="transactions"] tr.transaction'
 TRANSACTIONS_READY = '[data-testid="transactions"][data-state="ready"]'
+TRANSACTIONS_FAILED = '[data-testid="transactions"][data-state="error"]'
+# История загрузилась или кабинет показал ошибку загрузки
+TRANSACTIONS_SETTLED = f'{TRANSACTIONS_READY}, {TRANSACTIONS_FAILED}'
+TRANSACTIONS_EMPTY = '[data-testid="transactions"] .transactions-empty'
 SHOW_MORE_BUTTON = '[data-testid="transactions"] button.show-more'
 SCROLL_SENTINEL = '[data-testid="transactions"] .load-more-sentinel'
 

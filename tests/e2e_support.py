@@ -8,9 +8,13 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 from playwright.sync_api import BrowserContext, Page, expect
+
+from demo_bank.data import PRODUCTS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PROGRAM_TIMEOUT_SECONDS = 120
@@ -22,6 +26,7 @@ DEMO_LOGIN = 'demo'
 DEMO_PASSWORD = 'demo'
 DEMO_ONE_TIME_CODE = '0000'
 
+EXIT_COMPLETE = 0
 # Код завершения: выписка сохранена, есть предупреждения. В обычном режиме демо-банка они есть всегда:
 # дубликаты операций карты и операции вне периода
 EXIT_WITH_WARNINGS = 2
@@ -198,3 +203,59 @@ def finish_program(process: subprocess.Popen[str]) -> ProgramResult:
 
 def run_program(env: dict[str, str], work_dir: Path) -> ProgramResult:
     return finish_program(start_program(env, work_dir))
+
+
+def extract_statement(
+    demo_bank: DemoBankServer, client_browser: ClientBrowser, work_dir: Path, extra_env: dict[str, str] | None = None
+) -> ExtractionRun:
+    """Один запуск прототипа с действиями клиента; рабочая папка создаётся заново."""
+    work_dir.mkdir()
+    output_dir = work_dir / 'output'
+    env = demo_bank.program_env(client_browser_cdp_url=client_browser.cdp_url, output_dir=output_dir)
+    process = start_program(env | (extra_env or {}), work_dir)
+    give_consent_and_log_in(client_browser.context, expected_consent_texts=[])
+    result = finish_program(process)
+    run_folders = list(output_dir.iterdir()) if output_dir.exists() else []
+    assert len(run_folders) == 1, result.output
+    return ExtractionRun(result=result, run_folder=run_folders[0])
+
+
+@dataclass
+class ExtractionRun:
+    result: ProgramResult
+    run_folder: Path
+
+    def read_json(self, file_name: str) -> Any:
+        return json.loads((self.run_folder / file_name).read_text(encoding='utf-8'))
+
+
+# --- Чувствительные данные ---
+
+
+def _amount_variants(amount: Decimal) -> list[str]:
+    """Сумма так, как она могла бы попасть в текст: с точкой и с запятой."""
+    text = f'{abs(amount):.2f}'
+    return [text, text.replace('.', ',')]
+
+
+def collect_sensitive_values() -> list[str]:
+    """Суммы, описания, контрагенты и полные номера демо-клиента — их не должно быть в логах и отчёте."""
+    values: list[str] = []
+    for product in PRODUCTS:
+        values.extend(number for number in (product.card_number, product.account_number) if number)
+        if product.card_number:
+            # Как номер показан на странице: группами по четыре цифры
+            values.append(' '.join(product.card_number[index : index + 4] for index in range(0, 16, 4)))
+        for amount in (product.balance, product.available_balance, product.credit_limit, product.debt):
+            if amount is not None:
+                values.extend(_amount_variants(amount))
+        for transaction in product.transactions:
+            values.extend(_amount_variants(transaction.amount))
+            values.append(transaction.description)
+            if transaction.counterparty:
+                values.append(transaction.counterparty)
+    return sorted(set(values))
+
+
+def find_sensitive_values(text: str) -> list[str]:
+    return [value for value in collect_sensitive_values() if value in text]

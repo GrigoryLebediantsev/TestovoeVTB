@@ -18,10 +18,11 @@ class ConsentOutput(pydantic.BaseModel):
 
 class ProductReportOutput(pydantic.BaseModel):
     product_id: str
-    masked_number: str
+    masked_number: str | None
     status: domain.ProductExtractionStatus
-    extraction_source: domain.ExtractionSource
+    extraction_source: domain.ExtractionSource | None
     transactions_count: int
+    reason: str | None
 
     @classmethod
     def from_domain(cls, product_report: domain.ProductReport) -> ProductReportOutput:
@@ -31,6 +32,7 @@ class ProductReportOutput(pydantic.BaseModel):
             status=product_report.status,
             extraction_source=product_report.extraction_source,
             transactions_count=product_report.transactions_count,
+            reason=product_report.reason,
         )
 
 

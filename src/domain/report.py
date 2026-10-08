@@ -3,7 +3,8 @@ from dataclasses import dataclass, field
 
 from .consent import Consent
 from .period import Period
-from .transaction import ExtractionSource
+from .product import Product
+from .transaction import ExtractionSource, TransactionHistory
 
 
 class ProductExtractionStatus(enum.StrEnum):
@@ -15,10 +16,36 @@ class ProductExtractionStatus(enum.StrEnum):
 @dataclass
 class ProductReport:
     product_id: str
-    masked_number: str
+    masked_number: str | None  # нет у продукта, карточку которого получить не удалось
     status: ProductExtractionStatus
-    extraction_source: ExtractionSource
+    extraction_source: ExtractionSource | None  # нет у продукта, историю которого получить не удалось
     transactions_count: int
+    reason: str | None = None  # почему продукт извлечён не полностью или не извлечён
+
+    @classmethod
+    def from_history(cls, product: Product, history: TransactionHistory, transactions_count: int) -> ProductReport:
+        """Продукт, история которого получена: полностью или с пропусками."""
+        is_partial = history.incomplete_reason is not None
+        return cls(
+            product_id=product.product_id,
+            masked_number=product.masked_number,
+            status=ProductExtractionStatus.PARTIAL if is_partial else ProductExtractionStatus.COMPLETE,
+            extraction_source=history.source,
+            transactions_count=transactions_count,
+            reason=history.incomplete_reason,
+        )
+
+    @classmethod
+    def failed(cls, product_id: str, masked_number: str | None, reason: str) -> ProductReport:
+        """Продукт, карточку или историю которого получить не удалось."""
+        return cls(
+            product_id=product_id,
+            masked_number=masked_number,
+            status=ProductExtractionStatus.FAILED,
+            extraction_source=None,
+            transactions_count=0,
+            reason=reason,
+        )
 
 
 @dataclass

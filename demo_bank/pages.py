@@ -18,7 +18,8 @@ from .data import (
     HistoryLoading,
     filter_by_posting_date,
 )
-from .formats import CURRENCY_SYMBOLS, MONTH_NAMES_GENITIVE, ValueFormat
+from .formats import CURRENCY_SYMBOLS, MONTH_NAMES_GENITIVE
+from .view import CabinetView
 
 STYLE = """
 body { font-family: sans-serif; margin: 0; background: #f4f5f7; color: #1d1d1f; }
@@ -97,8 +98,8 @@ def one_time_code_page(error: str | None = None) -> str:
     )
 
 
-def products_page(value_format: ValueFormat) -> str:
-    items = ''.join(_product_card(product, value_format) for product in PRODUCTS)
+def products_page(view: CabinetView) -> str:
+    items = ''.join(_product_card(product, view) for product in PRODUCTS)
     return layout(
         'Мои продукты',
         f'<h1>Мои продукты</h1><ul class="products-list" data-testid="products-list">{items}</ul>',
@@ -106,10 +107,10 @@ def products_page(value_format: ValueFormat) -> str:
     )
 
 
-def _product_card(product: DemoProduct, value_format: ValueFormat) -> str:
+def _product_card(product: DemoProduct, view: CabinetView) -> str:
     number = product.card_number or product.account_number or ''
     amount = product.balance if product.balance is not None else product.debt
-    amount_text = value_format.money(amount, product.currency) if amount is not None else ''
+    amount_text = view.value_format.money(amount, product.currency) if amount is not None else ''
     return f"""<li class="product-card">
   <a class="product-link" href="/products/{escape(product.product_id)}">{escape(product.name)}</a>
   <span class="product-number">{escape(short_number(number))}</span>
@@ -121,9 +122,10 @@ def product_page(
     product: DemoProduct,
     date_from: datetime.date | None,
     date_to: datetime.date | None,
-    value_format: ValueFormat,
+    view: CabinetView,
     page_number: int = 1,
 ) -> str:
+    value_format = view.value_format
     fields: list[tuple[str, str]] = [('Тип', escape(product.type_label))]
     if product.card_number:
         fields.append(('Номер карты', escape(format_card_number(product.card_number))))
@@ -157,7 +159,7 @@ def product_page(
   <h1 class="product-title">{escape(product.name)}</h1>
   <dl class="product-fields">{rows}</dl>
 </section>
-{_transactions_section(product, date_from, date_to, value_format, page_number)}""",
+{_transactions_section(product, date_from, date_to, view, page_number)}""",
         signed_in=True,
     )
 
@@ -168,7 +170,7 @@ EMPTY_HISTORY = '<p class="transactions-empty">Операций нет</p>'
 HISTORY_PAGE_SIZE = 4
 
 # Подгрузка истории порциями: страница сама запрашивает сервер и дописывает строки в таблицу.
-# Даты и суммы показывает в том же формате, что и остальной кабинет (обычном или изменённом).
+# Даты, суммы и классы таблицы — такие же, как в остальном кабинете в текущем режиме.
 PORTION_LOADER_SCRIPT = """<script>
 (() => {
   const section = document.querySelector('[data-testid="transactions"]');
@@ -177,6 +179,9 @@ PORTION_LOADER_SCRIPT = """<script>
   const currencySymbols = __CURRENCY_SYMBOLS__;
   const monthNames = __MONTH_NAMES__;
   const isChangedFormat = __IS_CHANGED_FORMAT__;
+  const rowClass = __ROW_CLASS__;
+  const cellClassPrefix = __CELL_CLASS_PREFIX__;
+  const showMoreSelector = '.' + __SHOW_MORE_CLASS__;
   const statusLabels = {POSTED: 'Проведена', PENDING: 'В обработке', DECLINED: 'Отклонена'};
   let offset = 0;
   let hasMore = true;
@@ -198,12 +203,12 @@ PORTION_LOADER_SCRIPT = """<script>
   };
   const addCell = (row, name, text) => {
     const cell = row.insertCell();
-    cell.className = 'transaction-' + name;
+    cell.className = cellClassPrefix + name;
     cell.textContent = text;
   };
   const addRow = item => {
     const row = tableBody.insertRow();
-    row.className = 'transaction';
+    row.className = rowClass;
     if (item.id) row.dataset.transactionId = item.id;
     addCell(row, 'date', formatDate(item.operationDate));
     addCell(row, 'posting-date', formatDate(item.postingDate));
@@ -233,12 +238,14 @@ PORTION_LOADER_SCRIPT = """<script>
     offset += portion.items.length;
     hasMore = portion.hasMore;
     if (offset === 0) section.querySelector('.transactions-status').innerHTML = '__EMPTY_HISTORY__';
-    if (!hasMore) section.querySelectorAll('.show-more, .load-more-sentinel').forEach(item => item.remove());
+    if (!hasMore) {
+      section.querySelectorAll(`${showMoreSelector}, .load-more-sentinel`).forEach(item => item.remove());
+    }
     section.dataset.state = 'ready';
     isLoading = false;
   }
 
-  section.querySelector('.show-more')?.addEventListener('click', loadPortion);
+  section.querySelector(showMoreSelector)?.addEventListener('click', loadPortion);
   const sentinel = section.querySelector('.load-more-sentinel');
   if (sentinel) {
     window.addEventListener('scroll', () => {
@@ -250,11 +257,14 @@ PORTION_LOADER_SCRIPT = """<script>
 </script>""".replace('__EMPTY_HISTORY__', EMPTY_HISTORY)
 
 
-def _portion_loader_script(value_format: ValueFormat) -> str:
+def _portion_loader_script(view: CabinetView) -> str:
     return (
         PORTION_LOADER_SCRIPT.replace('__CURRENCY_SYMBOLS__', json.dumps(CURRENCY_SYMBOLS))
         .replace('__MONTH_NAMES__', json.dumps(MONTH_NAMES_GENITIVE))
-        .replace('__IS_CHANGED_FORMAT__', json.dumps(value_format.is_changed))
+        .replace('__IS_CHANGED_FORMAT__', json.dumps(view.value_format.is_changed))
+        .replace('__ROW_CLASS__', json.dumps(view.table_markup.row_class))
+        .replace('__CELL_CLASS_PREFIX__', json.dumps(view.table_markup.cell_class_prefix))
+        .replace('__SHOW_MORE_CLASS__', json.dumps(view.table_markup.show_more_class))
     )
 
 
@@ -262,17 +272,17 @@ def _transactions_section(
     product: DemoProduct,
     date_from: datetime.date | None,
     date_to: datetime.date | None,
-    value_format: ValueFormat,
+    view: CabinetView,
     page_number: int,
 ) -> str:
     if product.history_loading == HistoryLoading.PAGE:
-        history = _render_page_history(product, date_from, date_to, value_format)
+        history = _render_page_history(product, date_from, date_to, view)
         state = 'ready'
     elif product.history_loading == HistoryLoading.NUMBERED_PAGES:
-        history = _render_numbered_history(product, date_from, date_to, value_format, page_number)
+        history = _render_numbered_history(product, date_from, date_to, view, page_number)
         state = 'ready'
     else:
-        history = _render_portion_history(product.history_loading, value_format)
+        history = _render_portion_history(product.history_loading, view)
         state = 'loading'
     from_value = date_from.isoformat() if date_from else ''
     to_value = date_to.isoformat() if date_to else ''
@@ -297,12 +307,12 @@ def _transactions_section(
 
 
 def _render_page_history(
-    product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None, value_format: ValueFormat
+    product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None, view: CabinetView
 ) -> str:
     transactions = filter_by_posting_date(product.transactions, date_from, date_to)
     if not transactions:
         return EMPTY_HISTORY
-    rows = ''.join(_transaction_row(transaction, product.currency, value_format) for transaction in transactions)
+    rows = ''.join(_transaction_row(transaction, product.currency, view) for transaction in transactions)
     return f'<table class="transactions-table">{TRANSACTIONS_TABLE_HEAD}<tbody>{rows}</tbody></table>'
 
 
@@ -310,7 +320,7 @@ def _render_numbered_history(
     product: DemoProduct,
     date_from: datetime.date | None,
     date_to: datetime.date | None,
-    value_format: ValueFormat,
+    view: CabinetView,
     page_number: int,
 ) -> str:
     """История по страницам; ссылки страниц сохраняют фильтр периода."""
@@ -321,7 +331,7 @@ def _render_numbered_history(
     current_page = min(max(page_number, 1), pages_count)
     start = (current_page - 1) * HISTORY_PAGE_SIZE
     page_transactions = transactions[start : start + HISTORY_PAGE_SIZE]
-    rows = ''.join(_transaction_row(transaction, product.currency, value_format) for transaction in page_transactions)
+    rows = ''.join(_transaction_row(transaction, product.currency, view) for transaction in page_transactions)
 
     def page_href(number: int) -> str:
         query = {'from': date_from.isoformat() if date_from else '', 'to': date_to.isoformat() if date_to else ''}
@@ -339,26 +349,30 @@ def _render_numbered_history(
 <nav class="pagination">{''.join(page_items)}</nav>"""
 
 
-def _render_portion_history(history_loading: HistoryLoading, value_format: ValueFormat) -> str:
+def _render_portion_history(history_loading: HistoryLoading, view: CabinetView) -> str:
     if history_loading == HistoryLoading.SHOW_MORE:
-        more_control = '<button type="button" class="show-more">Показать ещё</button>'
+        show_more_class = escape(view.table_markup.show_more_class)
+        more_control = f'<button type="button" class="{show_more_class}">Показать ещё</button>'
     else:
         more_control = '<div class="scroll-spacer"></div><div class="load-more-sentinel"></div>'
     return f"""<table class="transactions-table">{TRANSACTIONS_TABLE_HEAD}<tbody></tbody></table>
 <div class="transactions-status"></div>
 {more_control}
-{_portion_loader_script(value_format)}"""
+{_portion_loader_script(view)}"""
 
 
-def _transaction_row(transaction: DemoTransaction, currency: str, value_format: ValueFormat) -> str:
+def _transaction_row(transaction: DemoTransaction, currency: str, view: CabinetView) -> str:
     id_attribute = f' data-transaction-id="{escape(transaction.bank_id)}"' if transaction.bank_id else ''
+    value_format = view.value_format
     posting_date = value_format.date(transaction.posting_date) if transaction.posting_date else EMPTY_CELL
-    return f"""<tr class="transaction"{id_attribute}>
-  <td class="transaction-date">{value_format.date(transaction.operation_date)}</td>
-  <td class="transaction-posting-date">{posting_date}</td>
-  <td class="transaction-description">{escape(transaction.description)}</td>
-  <td class="transaction-counterparty">{escape(transaction.counterparty or EMPTY_CELL)}</td>
-  <td class="transaction-category">{escape(transaction.category)}</td>
-  <td class="transaction-status">{escape(value_format.status(transaction))}</td>
-  <td class="transaction-amount">{escape(value_format.money(transaction.amount, currency, show_plus=True))}</td>
+    row_class = escape(view.table_markup.row_class)
+    cell_class = escape(view.table_markup.cell_class_prefix)
+    return f"""<tr class="{row_class}"{id_attribute}>
+  <td class="{cell_class}date">{value_format.date(transaction.operation_date)}</td>
+  <td class="{cell_class}posting-date">{posting_date}</td>
+  <td class="{cell_class}description">{escape(transaction.description)}</td>
+  <td class="{cell_class}counterparty">{escape(transaction.counterparty or EMPTY_CELL)}</td>
+  <td class="{cell_class}category">{escape(transaction.category)}</td>
+  <td class="{cell_class}status">{escape(value_format.status(transaction))}</td>
+  <td class="{cell_class}amount">{escape(value_format.money(transaction.amount, currency, show_plus=True))}</td>
 </tr>"""

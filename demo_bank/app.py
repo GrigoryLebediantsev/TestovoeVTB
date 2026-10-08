@@ -1,6 +1,9 @@
+import asyncio
+import dataclasses
 import datetime
 import enum
 import secrets
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Annotated
 from urllib.parse import parse_qs
@@ -13,6 +16,7 @@ from . import pages
 from .data import PRODUCTS_BY_ID, DemoProduct, DemoTransaction, filter_by_posting_date
 from .export import build_export_csv
 from .formats import ValueFormat
+from .view import CHANGED_TABLE_MARKUP, CabinetView, TableMarkup
 
 DEMO_LOGIN = 'demo'
 DEMO_PASSWORD = 'demo'
@@ -24,10 +28,22 @@ SESSION_COOKIE = 'demo_session'
 HISTORY_PORTION_SIZE = 5
 STATUS_CODE_BY_LABEL = {'Проведена': 'POSTED', 'В обработке': 'PENDING', 'Отклонена': 'DECLINED'}
 
+# Режим load_error: история одного продукта и страница другого всегда отвечают ошибкой сервера
+LOAD_ERROR_HISTORY_PRODUCT_ID = 'card-debit'
+LOAD_ERROR_PAGE_PRODUCT_ID = 'loan'
+# Режим slow: каждый ответ с задержкой, а первый запрос истории этого продукта за период — дольше таймаута
+SLOW_RESPONSE_DELAY_SECONDS = 0.3
+SLOW_HISTORY_PRODUCT_ID = 'card-debit'
+SLOW_FIRST_HISTORY_DELAY_SECONDS = 5
+
 
 class DemoBankMode(enum.StrEnum):
     NORMAL = 'normal'
     CHANGED_FORMAT = 'changed_format'  # даты словами, суммы с кодом валюты, один статус переименован
+    CHANGED_LAYOUT = 'changed_layout'  # другие классы таблицы операций и кнопки «Показать ещё»
+    LOAD_ERROR = 'load_error'
+    SLOW = 'slow'
+    EMPTY = 'empty'  # у продуктов нет операций
 
 
 @dataclass
@@ -37,6 +53,8 @@ class DemoBankState:
     sessions: set[str] = field(default_factory=set)
     # Запросы порций истории — по ним тест проверяет, что прототип не делает своих запросов
     history_requests: list[dict[str, object]] = field(default_factory=list)
+    # Режим slow: продукты, первый запрос истории которых уже задержан
+    delayed_history_products: set[str] = field(default_factory=set)
 
 
 class SetModeRequest(pydantic.BaseModel):
@@ -52,6 +70,26 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
 
     def current_value_format() -> ValueFormat:
         return ValueFormat(is_changed=state.mode == DemoBankMode.CHANGED_FORMAT)
+
+    def current_view() -> CabinetView:
+        is_layout_changed = state.mode == DemoBankMode.CHANGED_LAYOUT
+        return CabinetView(
+            value_format=current_value_format(),
+            table_markup=CHANGED_TABLE_MARKUP if is_layout_changed else TableMarkup(),
+        )
+
+    def find_product(product_id: str) -> DemoProduct | None:
+        """Продукт, как его видит кабинет в текущем режиме: в режиме empty — без операций."""
+        product = PRODUCTS_BY_ID.get(product_id)
+        if product is not None and state.mode == DemoBankMode.EMPTY:
+            return dataclasses.replace(product, transactions=[])
+        return product
+
+    @app.middleware('http')
+    async def delay_in_slow_mode(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        if state.mode == DemoBankMode.SLOW and not request.url.path.startswith('/_test/'):
+            await asyncio.sleep(SLOW_RESPONSE_DELAY_SECONDS)
+        return await call_next(request)
 
     @app.get('/')
     async def index() -> Response:
@@ -100,7 +138,7 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
     async def show_products(request: Request) -> Response:
         if not is_signed_in(request):
             return RedirectResponse('/login', status_code=303)
-        return HTMLResponse(pages.products_page(current_value_format()))
+        return HTMLResponse(pages.products_page(current_view()))
 
     @app.get('/products/{product_id}')
     async def show_product(
@@ -113,15 +151,17 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
     ) -> Response:
         if not is_signed_in(request):
             return RedirectResponse('/login', status_code=303)
-        product = PRODUCTS_BY_ID.get(product_id)
+        product = find_product(product_id)
         if product is None:
             return HTMLResponse(pages.layout('Не найдено', '<h1>Продукт не найден</h1>'), status_code=404)
+        if state.mode == DemoBankMode.LOAD_ERROR and product_id == LOAD_ERROR_PAGE_PRODUCT_ID:
+            return HTMLResponse(pages.layout('Ошибка', '<h1>Сервис временно недоступен</h1>'), status_code=500)
         return HTMLResponse(
             pages.product_page(
                 product,
                 _parse_query_date(date_from),
                 _parse_query_date(date_to),
-                current_value_format(),
+                current_view(),
                 page_number=page,
             )
         )
@@ -135,7 +175,7 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
     ) -> Response:
         if not is_signed_in(request):
             return RedirectResponse('/login', status_code=303)
-        product = PRODUCTS_BY_ID.get(product_id)
+        product = find_product(product_id)
         if product is None or not product.has_export:
             return HTMLResponse(pages.layout('Не найдено', '<h1>Экспорт недоступен</h1>'), status_code=404)
         transactions = filter_by_posting_date(
@@ -157,10 +197,17 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
     ) -> Response:
         if not is_signed_in(request):
             return JSONResponse({'detail': 'Not signed in'}, status_code=401)
-        product = PRODUCTS_BY_ID.get(product_id)
+        product = find_product(product_id)
         if product is None:
             return JSONResponse({'detail': 'Product not found'}, status_code=404)
         state.history_requests.append({'product_id': product_id, 'from': date_from, 'to': date_to, 'offset': offset})
+        if state.mode == DemoBankMode.LOAD_ERROR and product_id == LOAD_ERROR_HISTORY_PRODUCT_ID:
+            return JSONResponse({'detail': 'Internal server error'}, status_code=500)
+        is_slow_history = state.mode == DemoBankMode.SLOW and product_id == SLOW_HISTORY_PRODUCT_ID
+        # Задерживаем запрос за период: запрос без фильтра при открытии страницы прототип не ждёт
+        if is_slow_history and date_from and product_id not in state.delayed_history_products:
+            state.delayed_history_products.add(product_id)
+            await asyncio.sleep(SLOW_FIRST_HISTORY_DELAY_SECONDS)
         transactions = filter_by_posting_date(
             product.transactions, _parse_query_date(date_from), _parse_query_date(date_to)
         )
@@ -188,6 +235,7 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
         state.pending_logins.clear()
         state.sessions.clear()
         state.history_requests.clear()
+        state.delayed_history_products.clear()
         return {'mode': state.mode}
 
     return app

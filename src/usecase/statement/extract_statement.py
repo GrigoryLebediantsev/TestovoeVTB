@@ -1,6 +1,6 @@
 import datetime
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from src import domain, dto
@@ -27,17 +27,22 @@ async def extract_statement(self: Usecase, input: dto.ExtractStatementInput) -> 
     await self.bank.wait_for_login()
     log.info('Client logged in')
 
-    products = await self.bank.get_products()
-    log.info('Products extracted', extra={'products_count': len(products)})
+    product_ids = await self.bank.get_product_ids()
+    log.info('Products found', extra={'products_count': len(product_ids)})
 
+    products: list[domain.Product] = []
     transactions: list[domain.Transaction] = []
     product_reports: list[domain.ProductReport] = []
     warnings: list[str] = []
-    for product in products:
-        product_extraction = await _extract_transactions(self, product, period)
+    errors: list[str] = []
+    for product_id in product_ids:
+        product_extraction = await _extract_product(self, product_id, period)
+        if product_extraction.product is not None:
+            products.append(product_extraction.product)
         transactions.extend(product_extraction.transactions)
         product_reports.append(product_extraction.report)
         warnings.extend(product_extraction.warnings)
+        errors.extend(product_extraction.errors)
     warnings.extend(_mark_card_duplicates(products, transactions))
     extracted_at = datetime.datetime.now(datetime.UTC)
     duration_seconds = round((extracted_at - started_at).total_seconds(), DURATION_PRECISION_DIGITS)
@@ -54,6 +59,7 @@ async def extract_statement(self: Usecase, input: dto.ExtractStatementInput) -> 
         duration_seconds=duration_seconds,
         products=product_reports,
         warnings=warnings,
+        errors=errors,
     )
 
     folder_name = domain.build_run_folder_name(input.bank, started_at)
@@ -93,16 +99,44 @@ async def _save_statement(
 
 @dataclass
 class _ProductExtraction:
+    product: domain.Product | None  # нет, если карточку продукта получить не удалось
     transactions: list[domain.Transaction]
     report: domain.ProductReport
-    warnings: list[str]
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
-async def _extract_transactions(self: Usecase, product: domain.Product, period: domain.Period) -> _ProductExtraction:
-    """Операции продукта за период, строка отчёта о нём и предупреждения."""
-    history = await self.bank.get_transactions(product.product_id, period)
+async def _extract_product(self: Usecase, product_id: str, period: domain.Period) -> _ProductExtraction:
+    """Карточка продукта, его операции за период, строка отчёта о нём, предупреждения и ошибки.
+
+    Сбой одного продукта не останавливает запуск: продукт помечается как failed с причиной.
+    """
+    try:
+        product = await self.bank.get_product(product_id)
+    except domain.ExternalServiceError as error:
+        log.error('Product not extracted: %s', type(error).__name__, extra={'product_id': product_id})
+        return _ProductExtraction(
+            product=None,
+            transactions=[],
+            report=domain.ProductReport.failed(product_id, masked_number=None, reason=str(error)),
+            errors=[f'Продукт {product_id}: {error}'],
+        )
+
+    try:
+        history = await self.bank.get_transactions(product_id, period)
+    except domain.ExternalServiceError as error:
+        log.error('Transactions not extracted: %s', type(error).__name__, extra={'product_id': product_id})
+        return _ProductExtraction(
+            product=product,
+            transactions=[],
+            report=domain.ProductReport.failed(product_id, product.masked_number, reason=str(error)),
+            errors=[f'Продукт {product_id}: {error}'],
+        )
+
     period_split = domain.split_by_period(history.transactions, period)
     warnings = list(history.warnings)
+    if history.incomplete_reason:
+        warnings.append(f'Продукт {product.product_id}: {history.incomplete_reason}')
     if period_split.outside:
         warnings.append(f'Продукт {product.product_id}: отброшено операций вне периода: {len(period_split.outside)}')
 
@@ -115,14 +149,10 @@ async def _extract_transactions(self: Usecase, product: domain.Product, period: 
             'dropped_outside_period': len(period_split.outside),
         },
     )
-    product_report = domain.ProductReport(
-        product_id=product.product_id,
-        masked_number=product.masked_number,
-        status=domain.ProductExtractionStatus.COMPLETE,
-        extraction_source=history.source,
-        transactions_count=len(period_split.inside),
+    product_report = domain.ProductReport.from_history(product, history, transactions_count=len(period_split.inside))
+    return _ProductExtraction(
+        product=product, transactions=period_split.inside, report=product_report, warnings=warnings
     )
-    return _ProductExtraction(transactions=period_split.inside, report=product_report, warnings=warnings)
 
 
 async def _ask_consent(self: Usecase, period: domain.Period) -> domain.Consent:

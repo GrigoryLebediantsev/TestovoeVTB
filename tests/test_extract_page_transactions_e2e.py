@@ -91,6 +91,7 @@ EXPECTED_SAVINGS_REPORT = {
     'status': 'complete',
     'extraction_source': 'page',
     'transactions_count': 7,
+    'reason': None,
 }
 EXPECTED_LOAN_REPORT = {
     'product_id': 'loan',
@@ -98,6 +99,7 @@ EXPECTED_LOAN_REPORT = {
     'status': 'complete',
     'extraction_source': 'page',
     'transactions_count': 0,
+    'reason': None,
 }
 
 

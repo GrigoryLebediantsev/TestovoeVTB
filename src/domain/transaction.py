@@ -73,6 +73,7 @@ class TransactionHistory:
     transactions: list[Transaction]
     source: ExtractionSource
     warnings: list[str] = field(default_factory=list)
+    incomplete_reason: str | None = None  # история получена не вся, например кабинет не дал подгрузить остаток
 
 
 @dataclass

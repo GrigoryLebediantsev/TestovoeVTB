@@ -13,10 +13,19 @@ class Bank(typing.Protocol):
         """Открывает страницу входа и ждёт, пока клиент сам войдёт; при таймауте — domain.LoginTimeout."""
         ...
 
-    async def get_products(self) -> list[domain.Product]: ...
+    async def get_product_ids(self) -> list[str]:
+        """Продукты из списка в кабинете; список не загрузился — domain.ProductsNotLoaded."""
+        ...
+
+    async def get_product(self, product_id: str) -> domain.Product:
+        """Карточка продукта; не загрузилась — domain.ProductDetailsNotLoaded."""
+        ...
 
     async def get_transactions(self, product_id: str, period: domain.Period) -> domain.TransactionHistory:
-        """Операции продукта в единой схеме; фильтр периода выставляется в кабинете, если он там есть."""
+        """Операции продукта в единой схеме; фильтр периода выставляется в кабинете, если он там есть.
+
+        Сбой истории продукта — domain.ExternalServiceError с причиной для отчёта.
+        """
         ...
 
 

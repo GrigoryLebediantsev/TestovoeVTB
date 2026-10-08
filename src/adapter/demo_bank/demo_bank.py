@@ -1,4 +1,6 @@
+import functools
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,6 +24,17 @@ MAX_HISTORY_PAGES = 200
 SCROLL_DISTANCE_PIXELS = 100_000
 # Достаточно готовой разметки: нужные элементы затем ждём явно
 NAVIGATION_WAIT_UNTIL: Literal['domcontentloaded'] = 'domcontentloaded'
+
+
+class BankPageError(Exception):
+    """Кабинет ответил на открытие страницы ошибкой сервера."""
+
+
+# Технические сбои, после которых чтение стоит повторить: таймаут, ошибка кабинета.
+# Незнакомый формат данных (ValueError) не повторяем: повтор его не исправит
+RETRYABLE_ERRORS = (PlaywrightError, OSError, BankPageError, domain.TransactionsNotLoaded)
+HISTORY_INCOMPLETE_REASON = 'история загружена не полностью'
+HTTP_SERVER_ERROR = 500
 
 # Пары «подпись → значение и ссылка» со страницы продукта
 READ_FIELD_ROWS_SCRIPT = """rows => rows.map(row => ({
@@ -63,27 +76,80 @@ class DemoBank(Bank):
         except PlaywrightTimeoutError as error:
             raise domain.LoginTimeout() from error
 
-    async def get_products(self) -> list[domain.Product]:
-        page = self.browser.page
+    async def get_product_ids(self) -> list[str]:
         try:
-            await self._open(selectors.PRODUCTS_PATH)
-            await page.locator(selectors.PRODUCTS_LIST).wait_for(timeout=self._action_timeout_ms())
-            links: list[str] = await page.locator(selectors.PRODUCT_LINK).evaluate_all(READ_LINKS_SCRIPT)
-        except PlaywrightError as error:
+            links, _ = await self._with_retries(self._read_product_links, 'Products list')
+            product_ids = [parsing.parse_product_id(link) for link in links]
+        except (*RETRYABLE_ERRORS, ValueError) as error:
             log.error('Products list not loaded: %s', type(error).__name__)
             raise domain.ProductsNotLoaded() from error
-
-        product_ids = [parsing.parse_product_id(link) for link in links]
         log.info('Products found', extra={'product_ids': product_ids})
-        return [await self._get_product(product_id) for product_id in product_ids]
+        return product_ids
+
+    async def get_product(self, product_id: str) -> domain.Product:
+        try:
+            product, _ = await self._with_retries(
+                functools.partial(self._read_product, product_id), 'Product page', product_id
+            )
+        except (*RETRYABLE_ERRORS, ValueError) as error:
+            log.error('Product page not loaded: %s', type(error).__name__, extra={'product_id': product_id})
+            raise domain.ProductDetailsNotLoaded() from error
+        return product
 
     async def get_transactions(self, product_id: str, period: domain.Period) -> domain.TransactionHistory:
+        """Технические сбои повторяются RETRY_COUNT раз, затем — domain.TransactionsNotLoaded.
+
+        Незнакомая разметка или формат — сразу domain.TransactionsLayoutNotRecognized
+        или domain.TransactionsFormatNotRecognized: повтор их не исправит.
+        """
+        try:
+            history, retries_count = await self._with_retries(
+                functools.partial(self._read_history, product_id, period), 'History', product_id
+            )
+        except ValueError as error:
+            log.error('History format not recognized: %s', type(error).__name__, extra={'product_id': product_id})
+            raise domain.TransactionsFormatNotRecognized() from error
+        except RETRYABLE_ERRORS as error:
+            raise domain.TransactionsNotLoaded() from error
+        if retries_count > 0:
+            history.warnings.append(f'Продукт {product_id}: история загружена после повторной попытки')
+        return history
+
+    async def _with_retries[T](
+        self, read: Callable[[], Awaitable[T]], action_name: str, product_id: str | None = None
+    ) -> tuple[T, int]:
+        """Повторяет чтение после технического сбоя; возвращает результат и число повторов.
+
+        Последняя ошибка, когда повторы исчерпаны, пробрасывается как есть.
+        """
+        for retries_count in range(self.config.RETRY_COUNT):
+            try:
+                return await read(), retries_count
+            except RETRYABLE_ERRORS as error:
+                log.warning(
+                    '%s attempt %s failed, retrying: %s',
+                    action_name,
+                    retries_count + 1,
+                    type(error).__name__,
+                    extra={'product_id': product_id},
+                )
+        return await read(), self.config.RETRY_COUNT
+
+    async def _read_product_links(self) -> list[str]:
+        page = self.browser.page
+        await self._open(selectors.PRODUCTS_PATH)
+        await page.locator(selectors.PRODUCTS_LIST).wait_for(timeout=self._action_timeout_ms())
+        links: list[str] = await page.locator(selectors.PRODUCT_LINK).evaluate_all(READ_LINKS_SCRIPT)
+        return links
+
+    async def _read_history(self, product_id: str, period: domain.Period) -> domain.TransactionHistory:
         """Способы по порядку: экспорт CSV → ответы сервера на запросы страницы → разбор страницы (ADR 0002)."""
         page = self.browser.page
         history_responses: list[Response] = []
 
         def remember_history_response(response: Response) -> None:
-            if parsing.is_history_response_url(response.url, product_id, period=None):
+            # Ответ с ошибкой сервера не годится: о сбое кабинет сообщит на странице
+            if response.ok and parsing.is_history_response_url(response.url, product_id, period=None):
                 history_responses.append(response)
 
         # Своих запросов к серверу не делаем: только слушаем ответы на запросы страницы
@@ -125,12 +191,18 @@ class DemoBank(Bank):
         return history
 
     async def _open_product_history(self, product_id: str, period: domain.Period) -> bool:
-        """Открывает историю продукта с фильтром периода; False — фильтра в кабинете нет."""
+        """Открывает историю продукта с фильтром периода; False — фильтра в кабинете нет.
+
+        Если кабинет показал ошибку загрузки истории — domain.TransactionsNotLoaded.
+        """
         page = self.browser.page
         await self._open(f'{selectors.PRODUCTS_PATH}/{product_id}')
         await page.locator(selectors.TRANSACTIONS_SECTION).wait_for(timeout=self._action_timeout_ms())
         is_filter_applied = await self._apply_period_filter(period)
-        await page.locator(selectors.TRANSACTIONS_READY).wait_for(timeout=self._action_timeout_ms())
+        await page.locator(selectors.TRANSACTIONS_SETTLED).wait_for(timeout=self._action_timeout_ms())
+        if await page.locator(selectors.TRANSACTIONS_FAILED).count() > 0:
+            log.warning('Bank page shows history load error', extra={'product_id': product_id})
+            raise domain.TransactionsNotLoaded()
         return is_filter_applied
 
     async def _read_export_history(self, product_id: str) -> domain.TransactionHistory:
@@ -155,11 +227,12 @@ class DemoBank(Bank):
         page = self.browser.page
         portion = parsing.parse_server_portion(await first_response.json())
         items = list(portion.items)
-        warnings = []
+        incomplete_reason = None
         portions_count = 1
         while portion.has_more:
             if portions_count >= MAX_HISTORY_PORTIONS or not await self._has_next_portion_control():
-                warnings.append(f'Продукт {product_id}: история загружена не полностью')
+                log.warning('Next history portion control not found', extra={'product_id': product_id})
+                incomplete_reason = HISTORY_INCOMPLETE_REASON
                 break
             async with page.expect_response(
                 lambda response: parsing.is_history_response_url(response.url, product_id, period=filter_period),
@@ -173,7 +246,7 @@ class DemoBank(Bank):
 
         log.info('History collected', extra={'product_id': product_id, 'portions_count': portions_count})
         history = parsing.parse_server_transactions(product_id, items)
-        history.warnings.extend(warnings)
+        history.incomplete_reason = incomplete_reason
         return history
 
     async def _has_next_portion_control(self) -> bool:
@@ -194,7 +267,7 @@ class DemoBank(Bank):
         """Читает таблицу операций; если история разбита на страницы — переходит по ним, как клиент."""
         page = self.browser.page
         rows: list[dict[str, Any]] = []
-        warnings = []
+        incomplete_reason = None
         pages_count = 1
         while True:
             # Ключи словарей совпадают с полями TransactionRow: скрипт возвращает их тем же списком
@@ -202,17 +275,22 @@ class DemoBank(Bank):
             if await page.locator(selectors.NEXT_PAGE_LINK).count() == 0:
                 break
             if pages_count >= MAX_HISTORY_PAGES:
-                warnings.append(f'Продукт {product_id}: история загружена не полностью')
+                incomplete_reason = HISTORY_INCOMPLETE_REASON
                 break
             async with page.expect_navigation(timeout=self._action_timeout_ms(), wait_until=NAVIGATION_WAIT_UNTIL):
                 await page.locator(selectors.NEXT_PAGE_LINK).click()
             await page.locator(selectors.TRANSACTIONS_READY).wait_for(timeout=self._action_timeout_ms())
             pages_count += 1
 
+        # Ни строк, ни надписи «Операций нет»: разметка таблицы изменилась, пустую историю не выдумываем
+        if not rows and await page.locator(selectors.TRANSACTIONS_EMPTY).count() == 0:
+            log.warning('Transactions table not recognized', extra={'product_id': product_id})
+            raise domain.TransactionsLayoutNotRecognized()
+
         log.info('History pages read', extra={'product_id': product_id, 'pages_count': pages_count})
         transaction_rows = [parsing.TransactionRow(**row) for row in rows]
         history = parsing.parse_transactions(product_id, transaction_rows)
-        history.warnings.extend(warnings)
+        history.incomplete_reason = incomplete_reason
         return history
 
     async def _apply_period_filter(self, period: domain.Period) -> bool:
@@ -228,7 +306,7 @@ class DemoBank(Bank):
         await page.locator(selectors.TRANSACTIONS_SECTION).wait_for(timeout=self._action_timeout_ms())
         return True
 
-    async def _get_product(self, product_id: str) -> domain.Product:
+    async def _read_product(self, product_id: str) -> domain.Product:
         page = self.browser.page
         await self._open(f'{selectors.PRODUCTS_PATH}/{product_id}')
         await page.locator(selectors.PRODUCT_TITLE).wait_for(timeout=self._action_timeout_ms())
@@ -245,7 +323,11 @@ class DemoBank(Bank):
 
     async def _open(self, path: str) -> None:
         url = f'{self.config.BASE_URL.rstrip("/")}{path}'
-        await self.browser.page.goto(url, timeout=self._action_timeout_ms(), wait_until=NAVIGATION_WAIT_UNTIL)
+        response = await self.browser.page.goto(
+            url, timeout=self._action_timeout_ms(), wait_until=NAVIGATION_WAIT_UNTIL
+        )
+        if response is not None and response.status >= HTTP_SERVER_ERROR:
+            raise BankPageError(f'Bank page answered {response.status}')
 
     def _action_timeout_ms(self) -> float:
         return self.config.ACTION_TIMEOUT_SECONDS * MILLISECONDS_IN_SECOND
