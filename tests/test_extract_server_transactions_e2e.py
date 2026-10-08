@@ -59,7 +59,7 @@ EXPECTED_SOURCES = {
     'acc-rub': ('export', 9),
     'acc-usd': ('server_response', 12),
     'card-debit': ('server_response', 12),
-    'savings': ('page', 7),
+    'savings': ('page', 8),
     'loan': ('page', 0),
 }
 

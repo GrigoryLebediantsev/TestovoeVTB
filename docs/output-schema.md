@@ -261,7 +261,7 @@ product_id,type,name,masked_number,currency,balance,available_balance,linked_acc
     ]
   },
   "products_count": 5,
-  "transactions_count": 40,
+  "transactions_count": 41,
   "duration_seconds": 1.6,
   "products": [
     {
@@ -285,12 +285,11 @@ product_id,type,name,masked_number,currency,balance,available_balance,linked_acc
       "masked_number": "**** 1234",
       "status": "complete",
       "extraction_source": "page",
-      "transactions_count": 7,
+      "transactions_count": 8,
       "reason": null
     }
   ],
   "warnings": [
-    "Продукт savings: отброшено операций вне периода: 1",
     "Продукт card-debit: операция c-001 совпадает с операцией ef5888f8a27676d8-1 продукта acc-rub"
   ],
   "errors": []

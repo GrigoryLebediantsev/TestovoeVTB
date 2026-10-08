@@ -92,12 +92,30 @@ def test_empty_statement_has_full_precision_and_zero_recall() -> None:
     assert evaluation.recall == 0.0
 
 
-def test_reference_is_cut_by_statement_period_by_operation_date() -> None:
-    april_purchase = make_transaction(operation_date=datetime.date(2026, 4, 30))
-    reference = domain.ReferenceStatement(period=REFERENCE_PERIOD, transactions=[april_purchase, PURCHASE])
+def test_reference_is_cut_by_statement_period_by_posting_date() -> None:
+    april_purchase = make_transaction(operation_date=datetime.date(2026, 4, 29))
+    # Совершена до периода, но проведена в нём — в периоде, как и в выписке
+    posted_in_may = dataclasses.replace(
+        make_transaction(operation_date=datetime.date(2026, 4, 30)), posting_date=datetime.date(2026, 5, 1)
+    )
+    reference = domain.ReferenceStatement(
+        period=REFERENCE_PERIOD, transactions=[april_purchase, posted_in_may, PURCHASE]
+    )
 
     assert reference.covers(STATEMENT_PERIOD) is True
-    assert reference.transactions_in(STATEMENT_PERIOD) == [PURCHASE]
+    assert reference.transactions_in(STATEMENT_PERIOD) == [posted_in_may, PURCHASE]
+
+
+def test_reference_uses_operation_date_without_posting_date() -> None:
+    pending_on_last_day = dataclasses.replace(
+        make_transaction(operation_date=datetime.date(2026, 6, 30)), posting_date=None
+    )
+    pending_in_april = dataclasses.replace(
+        make_transaction(operation_date=datetime.date(2026, 4, 30)), posting_date=None
+    )
+    reference = domain.ReferenceStatement(period=REFERENCE_PERIOD, transactions=[pending_in_april, pending_on_last_day])
+
+    assert reference.transactions_in(STATEMENT_PERIOD) == [pending_on_last_day]
 
 
 def test_reference_does_not_cover_longer_period() -> None:

@@ -25,18 +25,36 @@ def make_transaction(operation_date: datetime.date, transaction_id: str = 'bank-
     )
 
 
-def test_split_by_period_keeps_bounds_and_uses_operation_date() -> None:
+def test_split_by_period_keeps_bounds_and_uses_posting_date() -> None:
     first_day = make_transaction(datetime.date(2026, 5, 1), 'first-day')
     last_day = make_transaction(datetime.date(2026, 6, 30), 'last-day')
     day_before = make_transaction(datetime.date(2026, 4, 30), 'day-before')
-    # Проведена в периоде, но совершена до него — вне периода
-    day_before.posting_date = datetime.date(2026, 5, 1)
     day_after = make_transaction(datetime.date(2026, 7, 1), 'day-after')
+    # Совершена до периода, но проведена в нём — в периоде
+    posted_on_first_day = make_transaction(datetime.date(2026, 4, 30), 'posted-on-first-day')
+    posted_on_first_day.posting_date = datetime.date(2026, 5, 1)
+    # Совершена в периоде, но проведена после него — вне периода
+    posted_after_last_day = make_transaction(datetime.date(2026, 6, 30), 'posted-after-last-day')
+    posted_after_last_day.posting_date = datetime.date(2026, 7, 1)
 
-    result = domain.split_by_period([day_before, first_day, last_day, day_after], PERIOD)
+    result = domain.split_by_period(
+        [day_before, posted_on_first_day, first_day, last_day, posted_after_last_day, day_after], PERIOD
+    )
 
-    assert result.inside == [first_day, last_day]
-    assert result.outside == [day_before, day_after]
+    assert result.inside == [posted_on_first_day, first_day, last_day]
+    assert result.outside == [day_before, posted_after_last_day, day_after]
+
+
+def test_split_by_period_uses_operation_date_without_posting_date() -> None:
+    pending_on_last_day = make_transaction(datetime.date(2026, 6, 30), 'pending-on-last-day')
+    pending_on_last_day.posting_date = None
+    declined_after_period = make_transaction(datetime.date(2026, 7, 1), 'declined-after-period')
+    declined_after_period.posting_date = None
+
+    result = domain.split_by_period([pending_on_last_day, declined_after_period], PERIOD)
+
+    assert result.inside == [pending_on_last_day]
+    assert result.outside == [declined_after_period]
 
 
 @pytest.mark.parametrize(

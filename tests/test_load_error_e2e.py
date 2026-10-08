@@ -40,7 +40,7 @@ EXPECTED_PRODUCT_REPORTS = [
         'masked_number': '**** 1234',
         'status': 'complete',
         'extraction_source': 'page',
-        'transactions_count': 7,
+        'transactions_count': 8,
         'reason': None,
     },
     {
@@ -58,7 +58,7 @@ EXPECTED_ERRORS = [
 ]
 # Карта без операций остаётся в выписке, кредит без карточки — нет
 EXPECTED_STATEMENT_PRODUCT_IDS = ['acc-rub', 'acc-usd', 'card-debit', 'savings']
-EXPECTED_TRANSACTIONS_COUNT = 28
+EXPECTED_TRANSACTIONS_COUNT = 29
 
 
 def test_load_error_flow(demo_bank: DemoBankServer, client_browser: ClientBrowser, tmp_path: Path) -> None:

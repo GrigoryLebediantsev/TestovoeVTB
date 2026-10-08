@@ -191,7 +191,7 @@ EXPECTED_PRODUCT_REPORTS = [
         'masked_number': '**** 1234',
         'status': 'complete',
         'extraction_source': 'page',
-        'transactions_count': 7,
+        'transactions_count': 8,
         'reason': None,
     },
     {
@@ -204,7 +204,6 @@ EXPECTED_PRODUCT_REPORTS = [
     },
 ]
 EXPECTED_REPORT_WARNINGS = [
-    'Продукт savings: отброшено операций вне периода: 1',
     'Продукт card-debit: операция c-001 совпадает с операцией',
 ]
 

@@ -83,10 +83,10 @@ class PeriodSplit:
 
 
 def split_by_period(transactions: list[Transaction], period: Period) -> PeriodSplit:
-    """Делит операции по дате операции: дата проведения может попасть в период, а сама операция — нет."""
+    """Делит операции по дате проведения, как фильтр кабинета; без даты проведения — по дате операции."""
     split = PeriodSplit(inside=[], outside=[])
     for transaction in transactions:
-        if period.date_from <= transaction.operation_date <= period.date_to:
+        if period.contains(transaction.posting_date or transaction.operation_date):
             split.inside.append(transaction)
         else:
             split.outside.append(transaction)

@@ -42,9 +42,10 @@ def savings_transaction(
     }
 
 
-# Кабинет фильтрует по дате проведения: операция 30.04, проведённая 01.05, приходит из кабинета,
-# но прототип отбрасывает её как совершённую вне периода. Операция 15.03 отсекается фильтром кабинета.
+# Период — по дате проведения, как у фильтра кабинета: операция 30.04, проведённая 01.05, в выписке.
+# Операция 15.03 отсекается фильтром кабинета.
 EXPECTED_SAVINGS_TRANSACTIONS = [
+    savings_transaction('2026-04-30', '2026-05-01', 6712.33, 'Выплата процентов за апрель', None, 'interest', 'posted'),
     savings_transaction(
         '2026-05-05',
         '2026-05-05',
@@ -87,7 +88,7 @@ EXPECTED_SAVINGS_REPORT = {
     'masked_number': '**** 1234',
     'status': 'complete',
     'extraction_source': 'page',
-    'transactions_count': 7,
+    'transactions_count': 8,
     'reason': None,
 }
 EXPECTED_LOAN_REPORT = {
@@ -132,7 +133,7 @@ def test_extract_page_transactions_flow(
     assert product_reports['savings'] == EXPECTED_SAVINGS_REPORT
     assert product_reports['loan'] == EXPECTED_LOAN_REPORT
     assert report['transactions_count'] == len(statement['transactions'])
-    assert 'Продукт savings: отброшено операций вне периода: 1' in report['warnings']
+    assert not any('отброшено операций вне периода' in warning for warning in report['warnings'])
 
 
 def _without_generated_id(transaction: dict[str, object]) -> dict[str, object]:

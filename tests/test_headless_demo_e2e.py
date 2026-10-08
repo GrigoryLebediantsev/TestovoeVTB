@@ -23,7 +23,7 @@ def test_headless_demo_flow(tmp_path: Path) -> None:
     )
     output = result.stdout + result.stderr
 
-    # В обычном режиме демо-банка всегда есть предупреждения: дубликаты операций карты и операции вне периода
+    # В обычном режиме демо-банка всегда есть предупреждения: дубликаты операций карты
     assert result.returncode == EXIT_WITH_WARNINGS, output
     assert SAVED_TEXT in output
     # Текст итоговой страницы, которую клиент видит в браузере
