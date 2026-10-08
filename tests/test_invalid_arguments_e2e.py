@@ -23,8 +23,8 @@ VALID_ENV = {
         (['--from', '2026-07-01'], {}, 'Начало периода позже конца'),
         ([], {'EXTRACTION__PERIOD_FROM': '2026-07-01'}, 'Начало периода позже конца'),
         (['--unknown'], {}, 'Неверные параметры запуска'),
-        (['--format', 'xml'], {}, 'Неверные параметры запуска'),
-        (['--log-level', 'LOUD'], {}, 'Неверные параметры запуска'),
+        (['--format', 'xml'], {}, 'choose from json, csv, both'),
+        (['--log-level', 'LOUD'], {}, 'choose from DEBUG, INFO, WARNING, ERROR'),
         (['--profile-dir', 'profile'], {}, '--profile-dir работает только с собственным браузером'),
     ],
     ids=[

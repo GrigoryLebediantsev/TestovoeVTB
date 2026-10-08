@@ -66,8 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--profile-dir', help='Папка постоянного профиля собственного браузера (по умолчанию из .env)')
     parser.add_argument(
         '--format',
-        type=domain.StatementFormat,
-        choices=list(domain.StatementFormat),
+        # Строки, а не перечисление: так при ошибке argparse перечислит допустимые значения
+        choices=[statement_format.value for statement_format in domain.StatementFormat],
         help='Файлы выписки: json, csv или both (по умолчанию из .env)',
     )
     parser.add_argument('--log-level', choices=LOG_LEVELS, help='Уровень лога (по умолчанию из .env)')
@@ -130,7 +130,7 @@ def parse_input(arguments: list[str], defaults: LaunchDefaults) -> LaunchInput |
             bank=defaults.bank,
             period_from=parsed.period_from or defaults.period_from,
             period_to=parsed.period_to or defaults.period_to,
-            format=parsed.format or defaults.format,
+            format=domain.StatementFormat(parsed.format) if parsed.format else defaults.format,
         )
         return LaunchInput(
             extraction_input=extraction_input,
