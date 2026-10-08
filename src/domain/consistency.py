@@ -19,7 +19,7 @@ class ConsistencyProblems:
 
 def check_statement_consistency(products: list[Product], transactions: list[Transaction]) -> ConsistencyProblems:
     id_counts = Counter(transaction.transaction_id for transaction in transactions)
-    repeated_ids = [transaction_id for transaction_id, count in id_counts.items() if count > 1]
+    repeated_transaction_ids = [transaction_id for transaction_id, count in id_counts.items() if count > 1]
 
     currency_by_product_id = {product.product_id: product.currency for product in products}
     currency_mismatches = [
@@ -29,13 +29,14 @@ def check_statement_consistency(products: list[Product], transactions: list[Tran
         and transaction.currency != currency_by_product_id[transaction.product_id]
     ]
 
+    product_ids = {product.product_id for product in products}
     missing_linked_accounts = [
         product
         for product in products
-        if product.linked_account_id is not None and product.linked_account_id not in currency_by_product_id
+        if product.linked_account_id is not None and product.linked_account_id not in product_ids
     ]
     return ConsistencyProblems(
-        repeated_transaction_ids=repeated_ids,
+        repeated_transaction_ids=repeated_transaction_ids,
         currency_mismatches=currency_mismatches,
         missing_linked_accounts=missing_linked_accounts,
     )

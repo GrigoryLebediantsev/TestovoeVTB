@@ -53,7 +53,8 @@ async def _extract_and_save(self: Usecase, input: dto.ExtractStatementInput) -> 
         warnings.extend(product_extraction.warnings)
         errors.extend(product_extraction.errors)
     warnings.extend(_mark_card_duplicates(products, transactions))
-    warnings.extend(_describe_consistency_problems(domain.check_statement_consistency(products, transactions)))
+    consistency_problems = domain.check_statement_consistency(products, transactions)
+    warnings.extend(_describe_consistency_problems(consistency_problems))
     extracted_at = datetime.datetime.now(datetime.UTC)
     duration_seconds = round((extracted_at - started_at).total_seconds(), DURATION_PRECISION_DIGITS)
 
