@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from src import domain
 
+from .evaluation.evaluate_statement import evaluate_statement
 from .statement.extract_statement import extract_statement
 
 
@@ -55,6 +56,17 @@ class ResultStorage(typing.Protocol):
         ...
 
 
+class StatementFiles(typing.Protocol):
+    async def read_extracted_statement(self, path: str) -> domain.ExtractedStatement:
+        """Выписка запуска: папка результата или statement.json; предупреждения — из extraction_report.json рядом.
+
+        Нет файла — domain.EvaluationFileNotFound, файл не той формы — domain.EvaluationFileInvalid.
+        """
+        ...
+
+    async def read_reference_statement(self, path: str) -> domain.ReferenceStatement: ...
+
+
 @dataclass
 class Usecase:
     bank: Bank
@@ -63,3 +75,12 @@ class Usecase:
 
     # Statement
     extract_statement = extract_statement
+
+
+@dataclass
+class EvaluationUsecase:
+    """Сценарии оценки качества: не требуют банка, браузера и настроек извлечения (ADR 0005)."""
+
+    statement_files: StatementFiles
+
+    evaluate_statement = evaluate_statement

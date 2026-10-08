@@ -7,6 +7,12 @@ class AccessDeniedError(DomainError): ...
 class ExternalServiceError(DomainError): ...
 
 
+class NotFoundError(DomainError): ...
+
+
+class ValidationFailedError(DomainError): ...
+
+
 class ConsentRefused(AccessDeniedError):
     def __init__(self) -> None:
         super().__init__('Клиент отказался от чтения данных')
@@ -47,3 +53,19 @@ class TransactionsFormatNotRecognized(ExternalServiceError):
 class TransactionsLayoutNotRecognized(ExternalServiceError):
     def __init__(self) -> None:
         super().__init__('разметка истории операций не распознана')
+
+
+# Оценка качества извлечения
+class EvaluationFileNotFound(NotFoundError):
+    def __init__(self, path: str) -> None:
+        super().__init__(f'Файл не найден: {path}')
+
+
+class EvaluationFileInvalid(ValidationFailedError):
+    def __init__(self, path: str) -> None:
+        super().__init__(f'Файл не похож на выписку прототипа: {path}')
+
+
+class ReferencePeriodNotCovered(ValidationFailedError):
+    def __init__(self) -> None:
+        super().__init__('Период выписки выходит за период эталонной выписки')

@@ -14,6 +14,9 @@ EXIT_COMPLETE = 0
 EXIT_FAILED = 1
 EXIT_WITH_WARNINGS = 2  # выписка сохранена, но есть предупреждения, ошибки или пропуски
 
+EVALUATE_COMMAND = 'evaluate'
+METRIC_DIGITS = 3
+
 
 @dataclass
 class LaunchDefaults:
@@ -39,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = RaisingArgumentParser(
         prog='python -m src.main',
         description='Извлечение комплексной банковской выписки после входа клиента в личный кабинет',
+        epilog=f'Оценка качества готовой выписки: python -m src.main {EVALUATE_COMMAND} --help',
     )
     parser.add_argument(
         '--from', dest='period_from', type=_parse_date, help='Начало периода, ГГГГ-ММ-ДД (по умолчанию из .env)'
@@ -47,6 +51,52 @@ def build_parser() -> argparse.ArgumentParser:
         '--to', dest='period_to', type=_parse_date, help='Конец периода, ГГГГ-ММ-ДД (по умолчанию из .env)'
     )
     return parser
+
+
+def build_evaluate_parser() -> argparse.ArgumentParser:
+    parser = RaisingArgumentParser(
+        prog=f'python -m src.main {EVALUATE_COMMAND}',
+        description='Сравнение выписки с эталонной: точность, полнота, доля нормализованных полей, предупреждения',
+    )
+    parser.add_argument('path', help='Папка результата запуска или файл statement.json')
+    parser.add_argument('--reference', help='Эталонная выписка (по умолчанию — эталон демо-банка)')
+    return parser
+
+
+def is_evaluate_command(arguments: list[str]) -> bool:
+    return arguments[:1] == [EVALUATE_COMMAND]
+
+
+def parse_evaluate_input(arguments: list[str], default_reference_path: str) -> dto.EvaluateStatementInput | None:
+    """Вход оценки из аргументов после слова evaluate. Неверные аргументы — сообщение оператору и None."""
+    try:
+        parsed = build_evaluate_parser().parse_args(arguments)
+    except InvalidArgumentsError as error:
+        log.error('Invalid evaluate arguments')
+        print(f'Неверные параметры запуска: {error}')
+        return None
+    return dto.EvaluateStatementInput(
+        statement_path=parsed.path, reference_path=parsed.reference or default_reference_path
+    )
+
+
+async def run_evaluation(evaluation_input: dto.EvaluateStatementInput) -> int:
+    try:
+        result = await deps.get_evaluation_usecase().evaluate_statement(evaluation_input)
+    except domain.DomainError as error:
+        log.error('Statement not evaluated: %s', error)
+        print(f'Оценка не выполнена: {error}')
+        return EXIT_FAILED
+
+    print(
+        f'Операций в выписке: {result.extracted_count}, в эталоне: {result.reference_count}, '
+        f'совпало: {result.matched_count}'
+    )
+    print(f'Точность (precision): {result.precision:.{METRIC_DIGITS}f}')
+    print(f'Полнота (recall): {result.recall:.{METRIC_DIGITS}f}')
+    print(f'Доля нормализованных полей: {result.normalized_fields_share:.{METRIC_DIGITS}f}')
+    print(f'Предупреждений: {result.warnings_count}')
+    return EXIT_COMPLETE
 
 
 def parse_input(arguments: list[str], defaults: LaunchDefaults) -> dto.ExtractStatementInput | None:

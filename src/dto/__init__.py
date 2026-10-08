@@ -1,3 +1,4 @@
+from .evaluation import EvaluateStatementInput, EvaluateStatementOutput
 from .report import ConsentOutput, ExtractionReportOutput, ProductReportOutput
 from .statement import (
     ExtractStatementInput,
@@ -13,6 +14,8 @@ from .statement import (
 
 __all__ = [
     'ConsentOutput',
+    'EvaluateStatementInput',
+    'EvaluateStatementOutput',
     'ExtractStatementInput',
     'ExtractStatementOutput',
     'ExtractionReportOutput',

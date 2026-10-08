@@ -4,7 +4,6 @@ import enum
 import pydantic
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from shared.config_helper import load_settings
 from shared.logger import LoggerConfig
 from src import domain
 from src.adapter.browser_window import BrowserWindowConfig
@@ -36,6 +35,3 @@ class Settings(BaseSettings):
     browser: BrowserWindowConfig = BrowserWindowConfig()  # BROWSER__MODE
     storage: StorageConfig = StorageConfig()  # STORAGE__OUTPUT_DIR, STORAGE__FORMAT
     logger: LoggerConfig = LoggerConfig()  # LOGGER__LEVEL
-
-
-settings: Settings = load_settings(Settings)
