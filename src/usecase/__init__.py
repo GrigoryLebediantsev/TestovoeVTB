@@ -34,6 +34,14 @@ class ClientWindow(typing.Protocol):
         """Показывает клиенту страницу согласия; True — «Разрешаю», False — «Отказываюсь»."""
         ...
 
+    async def show_summary(self, bank_name: str, report: domain.ExtractionReport) -> None:
+        """Итоговая страница без чувствительных данных; сбой показа не прерывает сценарий."""
+        ...
+
+    async def show_failure(self, reason: str) -> None:
+        """Страница «Выписка не сформирована» с причиной; сбой показа не прерывает сценарий."""
+        ...
+
 
 class ResultStorage(typing.Protocol):
     async def save_json(self, folder_name: str, file_name: str, content: dict[str, object]) -> str:

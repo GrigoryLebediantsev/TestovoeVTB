@@ -27,6 +27,7 @@ DEMO_PASSWORD = 'demo'
 DEMO_ONE_TIME_CODE = '0000'
 
 EXIT_COMPLETE = 0
+EXIT_FAILED = 1
 # Код завершения: выписка сохранена, есть предупреждения. В обычном режиме демо-банка они есть всегда:
 # дубликаты операций карты и операции вне периода
 EXIT_WITH_WARNINGS = 2
@@ -149,6 +150,24 @@ def start_client_chromium(executable_path: str, profile_dir: Path) -> tuple[subp
     return process, cdp_url
 
 
+def find_page_with_title(context: BrowserContext, title: str) -> Page | None:
+    for page in context.pages:
+        try:
+            if page.title() == title:
+                return page
+        except Exception:
+            # Страница могла закрыться или перейти по адресу во время проверки
+            continue
+    return None
+
+
+def read_page_text(context: BrowserContext, title: str) -> str:
+    """Текст страницы прототипа во вкладке клиента, например итоговой."""
+    page = find_page_with_title(context, title)
+    assert page is not None, f'Page {title!r} not found'
+    return page.inner_text('body')
+
+
 def find_page_with_button(context: BrowserContext, button_name: str) -> Page | None:
     for page in context.pages:
         try:
@@ -184,10 +203,10 @@ def program_environment(env: dict[str, str]) -> dict[str, str]:
     return {'PATH': os.environ['PATH'], 'PYTHONPATH': str(REPO_ROOT), **env}
 
 
-def start_program(env: dict[str, str], work_dir: Path) -> subprocess.Popen[str]:
+def start_program(env: dict[str, str], work_dir: Path, arguments: list[str] | None = None) -> subprocess.Popen[str]:
     """Запуск прототипа так же, как из командной строки; рабочая папка без .env."""
     return subprocess.Popen(
-        [sys.executable, '-m', 'src.main'],
+        [sys.executable, '-m', 'src.main', *(arguments or [])],
         cwd=work_dir,
         env=program_environment(env),
         stdout=subprocess.PIPE,
@@ -201,8 +220,8 @@ def finish_program(process: subprocess.Popen[str]) -> ProgramResult:
     return ProgramResult(returncode=process.returncode, output=output)
 
 
-def run_program(env: dict[str, str], work_dir: Path) -> ProgramResult:
-    return finish_program(start_program(env, work_dir))
+def run_program(env: dict[str, str], work_dir: Path, arguments: list[str] | None = None) -> ProgramResult:
+    return finish_program(start_program(env, work_dir, arguments))
 
 
 def extract_statement(

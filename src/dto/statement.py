@@ -23,6 +23,12 @@ class ExtractStatementInput(pydantic.BaseModel):
     period_to: datetime.date
     format: domain.StatementFormat = domain.StatementFormat.BOTH
 
+    @pydantic.model_validator(mode='after')
+    def check_period_order(self) -> ExtractStatementInput:
+        if self.period_from > self.period_to:
+            raise ValueError('Начало периода позже конца')
+        return self
+
 
 class ExtractStatementOutput(pydantic.BaseModel):
     output_folder: str

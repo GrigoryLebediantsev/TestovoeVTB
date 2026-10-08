@@ -3,7 +3,7 @@ import logging
 import sys
 
 from shared import logger
-from src import deps, dto
+from src import deps
 from src.adapter.browser_window import BrowserWindow
 from src.adapter.demo_bank import DemoBank
 from src.adapter.file_storage import FileStorage
@@ -15,6 +15,11 @@ log = logging.getLogger(__name__)
 
 
 async def run_application(arguments: list[str]) -> int:
+    # Параметры проверяются до открытия браузера: при ошибке клиент не видит страницу согласия
+    extraction_input = cli.parse_input(arguments, launch_defaults)
+    if extraction_input is None:
+        return cli.EXIT_FAILED
+
     try:
         await browser_window.connect()
     except Exception:
@@ -22,7 +27,7 @@ async def run_application(arguments: list[str]) -> int:
         return cli.EXIT_FAILED
 
     try:
-        return await cli.run(arguments, default_input)
+        return await cli.run(extraction_input)
     finally:
         await browser_window.close()
 
@@ -42,7 +47,7 @@ usecase = Usecase(
 )
 deps.set_usecase(usecase)
 
-default_input = dto.ExtractStatementInput(
+launch_defaults = cli.LaunchDefaults(
     bank=settings.extraction.BANK,
     period_from=settings.extraction.PERIOD_FROM,
     period_to=settings.extraction.PERIOD_TO,

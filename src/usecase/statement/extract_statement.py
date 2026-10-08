@@ -18,6 +18,15 @@ DURATION_PRECISION_DIGITS = 1
 
 
 async def extract_statement(self: Usecase, input: dto.ExtractStatementInput) -> dto.ExtractStatementOutput:
+    """Выписка от согласия клиента до записи файлов; итог или причину неудачи клиент видит в браузере."""
+    try:
+        return await _extract_and_save(self, input)
+    except domain.DomainError as error:
+        await self.client_window.show_failure(str(error))
+        raise
+
+
+async def _extract_and_save(self: Usecase, input: dto.ExtractStatementInput) -> dto.ExtractStatementOutput:
     started_at = datetime.datetime.now(datetime.UTC)
     period = domain.Period(date_from=input.period_from, date_to=input.period_to)
 
@@ -67,6 +76,7 @@ async def extract_statement(self: Usecase, input: dto.ExtractStatementInput) -> 
     report_content = dto.ExtractionReportOutput.from_domain(report).model_dump()
     output_folder = await self.storage.save_json(folder_name, REPORT_FILE_NAME, report_content)
     log.info('Statement saved', extra={'output_folder': output_folder, 'format': input.format})
+    await self.client_window.show_summary(self.bank.display_name, report)
 
     return dto.ExtractStatementOutput(
         output_folder=output_folder,
