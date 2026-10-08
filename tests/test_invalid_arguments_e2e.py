@@ -23,8 +23,19 @@ VALID_ENV = {
         (['--from', '2026-07-01'], {}, 'Начало периода позже конца'),
         ([], {'EXTRACTION__PERIOD_FROM': '2026-07-01'}, 'Начало периода позже конца'),
         (['--unknown'], {}, 'Неверные параметры запуска'),
+        (['--format', 'xml'], {}, 'Неверные параметры запуска'),
+        (['--log-level', 'LOUD'], {}, 'Неверные параметры запуска'),
+        (['--profile-dir', 'profile'], {}, '--profile-dir работает только с собственным браузером'),
     ],
-    ids=['not a date', 'from after to', 'env from after to', 'unknown argument'],
+    ids=[
+        'not a date',
+        'from after to',
+        'env from after to',
+        'unknown argument',
+        'unknown format',
+        'unknown log level',
+        'profile dir with cdp',
+    ],
 )
 def test_invalid_arguments_flow(
     arguments: list[str], env_override: dict[str, str], expected_message: str, tmp_path: Path
