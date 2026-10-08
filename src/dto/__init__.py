@@ -1,4 +1,4 @@
-from .report import ConsentOutput, ExtractionReportOutput
+from .report import ConsentOutput, ExtractionReportOutput, ProductReportOutput
 from .statement import (
     ExtractStatementInput,
     ExtractStatementOutput,
@@ -7,6 +7,7 @@ from .statement import (
     ProductOutput,
     ProductRequisitesOutput,
     StatementOutput,
+    TransactionOutput,
 )
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     'PeriodOutput',
     'ProductDetailsOutput',
     'ProductOutput',
+    'ProductReportOutput',
     'ProductRequisitesOutput',
     'StatementOutput',
+    'TransactionOutput',
 ]

@@ -1,5 +1,5 @@
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -24,6 +24,20 @@ READ_FIELD_ROWS_SCRIPT = """rows => rows.map(row => ({
     link: row.querySelector('dd a')?.getAttribute('href') ?? null,
 }))"""
 READ_LINKS_SCRIPT = 'links => links.map(link => link.getAttribute("href"))'
+# Ячейки строк таблицы операций; идентификатор банка — в атрибуте строки, если банк его показывает
+READ_TRANSACTION_ROWS_SCRIPT = """rows => rows.map(row => {
+    const cell = name => row.querySelector('.transaction-' + name)?.innerText.trim() ?? '';
+    return {
+        bank_id: row.dataset.transactionId ?? null,
+        operation_date: cell('date'),
+        posting_date: cell('posting-date'),
+        description: cell('description'),
+        counterparty: cell('counterparty'),
+        category: cell('category'),
+        status: cell('status'),
+        amount: cell('amount'),
+    };
+})"""
 
 
 class DemoBank(Bank):
@@ -56,6 +70,38 @@ class DemoBank(Bank):
         product_ids = [parsing.parse_product_id(link) for link in links]
         log.info('Products found', extra={'product_ids': product_ids})
         return [await self._get_product(product_id) for product_id in product_ids]
+
+    async def get_transactions(self, product_id: str, period: domain.Period) -> domain.TransactionHistory:
+        page = self.browser.page
+        await self._open(f'{selectors.PRODUCTS_PATH}/{product_id}')
+        await page.locator(selectors.TRANSACTIONS_SECTION).wait_for(timeout=self._action_timeout_ms())
+        warnings = []
+        is_filter_applied = await self._apply_period_filter(period)
+        if not is_filter_applied:
+            warnings.append(f'Продукт {product_id}: фильтр периода в кабинете не найден')
+
+        # Ключи словарей совпадают с полями TransactionRow: скрипт возвращает их тем же списком
+        rows: list[dict[str, Any]] = await page.locator(selectors.TRANSACTION_ROW).evaluate_all(
+            READ_TRANSACTION_ROWS_SCRIPT
+        )
+        transaction_rows = [parsing.TransactionRow(**row) for row in rows]
+        transactions = parsing.parse_transactions(product_id, transaction_rows)
+        return domain.TransactionHistory(
+            transactions=transactions, source=domain.ExtractionSource.PAGE, warnings=warnings
+        )
+
+    async def _apply_period_filter(self, period: domain.Period) -> bool:
+        """Выставляет период в фильтре кабинета и ждёт перезагрузки истории; False — фильтра на странице нет."""
+        page = self.browser.page
+        if await page.locator(selectors.PERIOD_FILTER_FORM).count() == 0:
+            log.warning('Period filter not found, history loaded without it')
+            return False
+        await page.locator(selectors.PERIOD_FILTER_FROM).fill(period.date_from.isoformat())
+        await page.locator(selectors.PERIOD_FILTER_TO).fill(period.date_to.isoformat())
+        async with page.expect_navigation(timeout=self._action_timeout_ms(), wait_until=NAVIGATION_WAIT_UNTIL):
+            await page.locator(selectors.PERIOD_FILTER_SUBMIT).click()
+        await page.locator(selectors.TRANSACTIONS_SECTION).wait_for(timeout=self._action_timeout_ms())
+        return True
 
     async def _get_product(self, product_id: str) -> domain.Product:
         page = self.browser.page

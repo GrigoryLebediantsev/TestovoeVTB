@@ -23,10 +23,27 @@ PRODUCT_TYPE_BY_LABEL = {
     'кредит': domain.ProductType.LOAN,
 }
 
-# '−1 450,00 ₽': знак, цифры с пробелами-разделителями тысяч, необязательные копейки, символ валюты
+TRANSACTION_STATUS_BY_LABEL = {
+    'проведена': domain.TransactionStatus.POSTED,
+    'в обработке': domain.TransactionStatus.PENDING,
+    'отклонена': domain.TransactionStatus.DECLINED,
+}
+
+TRANSACTION_CATEGORY_BY_LABEL = {
+    'пополнение': domain.TransactionCategory.TOP_UP,
+    'проценты': domain.TransactionCategory.INTEREST,
+    'снятие': domain.TransactionCategory.WITHDRAWAL,
+    'перевод': domain.TransactionCategory.TRANSFER,
+}
+
+# Так кабинет показывает пустую ячейку
+EMPTY_CELL_TEXT = '—'
+
+# '−1 450,00 ₽', '+500,00 ₽': знак, цифры с пробелами-разделителями тысяч, необязательные копейки, символ валюты
 MONEY_PATTERN = re.compile(
-    r'^(?P<sign>[-−]?)(?P<integer>\d{1,3}(?: \d{3})*|\d+)(?:,(?P<fraction>\d{1,2}))? (?P<symbol>\S)$'
+    r'^(?P<sign>[-−+]?)(?P<integer>\d{1,3}(?: \d{3})*|\d+)(?:,(?P<fraction>\d{1,2}))? (?P<symbol>\S)$'
 )
+MINUS_SIGNS = ('-', '−')
 PERCENT_PATTERN = re.compile(r'^(?P<number>\d+(?:,\d+)?) ?%$')
 DATE_FORMAT = '%d.%m.%Y'
 
@@ -35,6 +52,20 @@ DATE_FORMAT = '%d.%m.%Y'
 class ProductField:
     text: str
     link: str | None = None
+
+
+@dataclass
+class TransactionRow:
+    """Строка таблицы операций как текст ячеек."""
+
+    bank_id: str | None
+    operation_date: str
+    posting_date: str
+    description: str
+    counterparty: str
+    category: str
+    status: str
+    amount: str
 
 
 @dataclass
@@ -57,7 +88,7 @@ def parse_money(text: str) -> ParsedMoney:
     if match['fraction']:
         number = f'{number}.{match["fraction"]}'
     amount = Decimal(number)
-    if match['sign']:
+    if match['sign'] in MINUS_SIGNS:
         amount = -amount
     return ParsedMoney(amount=amount, currency=currency)
 
@@ -71,6 +102,29 @@ def parse_percent(text: str) -> Decimal:
 
 def parse_date(text: str) -> datetime.date:
     return datetime.datetime.strptime(text.strip(), DATE_FORMAT).date()
+
+
+def parse_optional_date(text: str) -> datetime.date | None:
+    if _is_empty_cell(text):
+        return None
+    return parse_date(text)
+
+
+def parse_transaction_status(text: str) -> domain.TransactionStatus:
+    status = TRANSACTION_STATUS_BY_LABEL.get(text.strip().lower())
+    if not status:
+        raise ValueError(f'Unknown transaction status: {text!r}')
+    return status
+
+
+def parse_transaction_category(text: str) -> domain.TransactionCategory:
+    return TRANSACTION_CATEGORY_BY_LABEL.get(text.strip().lower(), domain.TransactionCategory.OTHER)
+
+
+def parse_transactions(product_id: str, rows: list[TransactionRow]) -> list[domain.Transaction]:
+    """Приводит строки таблицы к единой схеме; операциям без банковского идентификатора генерирует устойчивый."""
+    id_generator = domain.TransactionIdGenerator()
+    return [_parse_transaction(product_id, row, id_generator) for row in rows]
 
 
 def parse_product_type(text: str) -> domain.ProductType:
@@ -125,6 +179,41 @@ def parse_product(product_id: str, name: str, fields: dict[str, ProductField]) -
             debt=debt.amount if debt else None,
         ),
     )
+
+
+def _parse_transaction(
+    product_id: str, row: TransactionRow, id_generator: domain.TransactionIdGenerator
+) -> domain.Transaction:
+    operation_date = parse_date(row.operation_date)
+    posting_date = parse_optional_date(row.posting_date)
+    money = parse_money(row.amount)
+    description = _normalize_spaces(row.description)
+
+    if row.bank_id:
+        transaction_id = row.bank_id
+        id_source = domain.TransactionIdSource.BANK
+    else:
+        transaction_id = id_generator.next_id(product_id, operation_date, money.amount, description)
+        id_source = domain.TransactionIdSource.GENERATED
+
+    return domain.Transaction(
+        transaction_id=transaction_id,
+        id_source=id_source,
+        product_id=product_id,
+        operation_date=operation_date,
+        posting_date=posting_date,
+        amount=money.amount,
+        currency=money.currency,
+        type=domain.transaction_type_for_amount(money.amount),
+        description=description,
+        counterparty=None if _is_empty_cell(row.counterparty) else _normalize_spaces(row.counterparty),
+        category=parse_transaction_category(row.category),
+        status=parse_transaction_status(row.status),
+    )
+
+
+def _is_empty_cell(text: str) -> bool:
+    return text.strip() in ('', EMPTY_CELL_TEXT)
 
 
 def _read_text(fields: dict[str, ProductField], label: str) -> str | None:

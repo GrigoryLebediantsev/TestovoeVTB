@@ -12,6 +12,7 @@ from .data import (
     PRODUCTS,
     PRODUCTS_BY_ID,
     DemoProduct,
+    DemoTransaction,
 )
 
 CURRENCY_SYMBOLS = {'RUB': '₽', 'USD': '$', 'EUR': '€'}
@@ -29,12 +30,21 @@ button { margin-top: 16px; padding: 8px 16px; }
 .product-fields div { display: flex; gap: 16px; padding: 4px 0; }
 .product-fields dt { width: 200px; color: #666; }
 .product-fields dd { margin: 0; }
+.period-filter { display: flex; gap: 8px; align-items: end; }
+.period-filter input { width: auto; }
+.transactions-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.transactions-table td, .transactions-table th { border-bottom: 1px solid #ddd; padding: 6px 4px; text-align: left; }
 """
 
 
-def format_money(amount: Decimal, currency: str) -> str:
+EMPTY_CELL = '—'
+
+
+def format_money(amount: Decimal, currency: str, show_plus: bool = False) -> str:
     """125430.50, RUB → '125 430,50 ₽' (пробел-разделитель тысяч — неразрывный)."""
     sign = '−' if amount < 0 else ''
+    if show_plus and amount > 0:
+        sign = '+'
     integer_part, fraction_part = f'{abs(amount):.2f}'.split('.')
     grouped = f'{int(integer_part):,}'.replace(',', ' ')
     return f'{sign}{grouped},{fraction_part} {CURRENCY_SYMBOLS[currency]}'
@@ -116,7 +126,7 @@ def _product_card(product: DemoProduct) -> str:
 </li>"""
 
 
-def product_page(product: DemoProduct) -> str:
+def product_page(product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None) -> str:
     fields: list[tuple[str, str]] = [('Тип', escape(product.type_label))]
     if product.card_number:
         fields.append(('Номер карты', escape(format_card_number(product.card_number))))
@@ -149,6 +159,60 @@ def product_page(product: DemoProduct) -> str:
 <section class="product" data-product-id="{escape(product.product_id)}">
   <h1 class="product-title">{escape(product.name)}</h1>
   <dl class="product-fields">{rows}</dl>
-</section>""",
+</section>
+{_transactions_section(product, date_from, date_to)}""",
         signed_in=True,
     )
+
+
+def filter_by_posting_date(
+    transactions: list[DemoTransaction], date_from: datetime.date | None, date_to: datetime.date | None
+) -> list[DemoTransaction]:
+    """Фильтр кабинета: по дате проведения, у непроведённых — по дате операции."""
+    selected = []
+    for transaction in transactions:
+        filter_date = transaction.posting_date or transaction.operation_date
+        if date_from and filter_date < date_from:
+            continue
+        if date_to and filter_date > date_to:
+            continue
+        selected.append(transaction)
+    return selected
+
+
+def _transactions_section(product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None) -> str:
+    transactions = filter_by_posting_date(product.transactions, date_from, date_to)
+    if transactions:
+        rows = ''.join(_transaction_row(transaction, product.currency) for transaction in transactions)
+        history = f"""<table class="transactions-table">
+<thead><tr><th>Дата</th><th>Проведена</th><th>Описание</th><th>Контрагент</th><th>Категория</th><th>Статус</th>
+<th>Сумма</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>"""
+    else:
+        history = '<p class="transactions-empty">Операций нет</p>'
+    from_value = date_from.isoformat() if date_from else ''
+    to_value = date_to.isoformat() if date_to else ''
+    return f"""<section class="transactions" data-testid="transactions">
+<h2>Операции</h2>
+<form class="period-filter" method="get">
+  <label>С <input name="from" type="date" value="{from_value}"></label>
+  <label>По <input name="to" type="date" value="{to_value}"></label>
+  <button type="submit">Показать</button>
+</form>
+{history}
+</section>"""
+
+
+def _transaction_row(transaction: DemoTransaction, currency: str) -> str:
+    id_attribute = f' data-transaction-id="{escape(transaction.bank_id)}"' if transaction.bank_id else ''
+    posting_date = format_date(transaction.posting_date) if transaction.posting_date else EMPTY_CELL
+    return f"""<tr class="transaction"{id_attribute}>
+  <td class="transaction-date">{format_date(transaction.operation_date)}</td>
+  <td class="transaction-posting-date">{posting_date}</td>
+  <td class="transaction-description">{escape(transaction.description)}</td>
+  <td class="transaction-counterparty">{escape(transaction.counterparty or EMPTY_CELL)}</td>
+  <td class="transaction-category">{escape(transaction.category)}</td>
+  <td class="transaction-status">{escape(transaction.status)}</td>
+  <td class="transaction-amount">{escape(format_money(transaction.amount, currency, show_plus=True))}</td>
+</tr>"""

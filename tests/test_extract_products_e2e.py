@@ -124,7 +124,6 @@ def test_extract_products_flow(demo_bank: DemoBankServer, client_browser: Client
     assert statement['period'] == {'from': PERIOD_FROM, 'to': PERIOD_TO}
     assert statement['extracted_at'].endswith('Z') or statement['extracted_at'].endswith('+00:00')
     assert {product['product_id']: product for product in statement['products']} == EXPECTED_PRODUCTS
-    assert statement['transactions'] == []
 
     report = json.loads((run_folder / 'extraction_report.json').read_text(encoding='utf-8'))
     assert report['bank'] == 'demo_bank'

@@ -31,4 +31,5 @@ async def run(arguments: list[str], default_input: dto.ExtractStatementInput) ->
 
     print(f'Выписка сохранена: {result.output_folder}')
     print(f'Продуктов: {result.products_count}')
+    print(f'Операций: {result.transactions_count}')
     return EXIT_COMPLETE

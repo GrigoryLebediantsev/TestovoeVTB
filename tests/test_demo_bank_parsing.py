@@ -16,6 +16,7 @@ from src.adapter.demo_bank import parsing
         ('99,90 €', Decimal('99.90'), 'EUR'),
         ('−1 450,00 ₽', Decimal('-1450.00'), 'RUB'),
         ('-0,01 ₽', Decimal('-0.01'), 'RUB'),
+        ('+50 000,00 ₽', Decimal('50000.00'), 'RUB'),
         ('500 000 ₽', Decimal('500000'), 'RUB'),
     ],
 )
@@ -131,3 +132,106 @@ def test_parse_product_reads_requisites_and_loan_details() -> None:
 def test_parse_product_without_type_fails() -> None:
     with pytest.raises(ValueError):
         parsing.parse_product('unknown', 'Продукт', {'Баланс': parsing.ProductField(text='1,00 ₽')})
+
+
+@pytest.mark.parametrize(('text', 'expected'), [('01.05.2026', datetime.date(2026, 5, 1)), ('—', None), ('', None)])
+def test_parse_optional_date(text: str, expected: datetime.date | None) -> None:
+    assert parsing.parse_optional_date(text) == expected
+
+
+@pytest.mark.parametrize(
+    ('text', 'expected'),
+    [
+        ('Проведена', domain.TransactionStatus.POSTED),
+        ('В обработке', domain.TransactionStatus.PENDING),
+        ('Отклонена', domain.TransactionStatus.DECLINED),
+        (' проведена ', domain.TransactionStatus.POSTED),
+    ],
+)
+def test_parse_transaction_status(text: str, expected: domain.TransactionStatus) -> None:
+    assert parsing.parse_transaction_status(text) == expected
+
+
+def test_parse_transaction_status_rejects_unknown() -> None:
+    with pytest.raises(ValueError):
+        parsing.parse_transaction_status('Заморожена')
+
+
+@pytest.mark.parametrize(
+    ('text', 'expected'),
+    [
+        ('Пополнение', domain.TransactionCategory.TOP_UP),
+        ('Проценты', domain.TransactionCategory.INTEREST),
+        ('Снятие', domain.TransactionCategory.WITHDRAWAL),
+        ('Перевод', domain.TransactionCategory.TRANSFER),
+        (' перевод ', domain.TransactionCategory.TRANSFER),
+        ('Кешбэк за покупки', domain.TransactionCategory.OTHER),
+        ('', domain.TransactionCategory.OTHER),
+    ],
+)
+def test_parse_transaction_category(text: str, expected: domain.TransactionCategory) -> None:
+    assert parsing.parse_transaction_category(text) == expected
+
+
+def make_row(
+    bank_id: str | None = None,
+    amount: str = '+1 000,00 ₽',
+    counterparty: str = 'Текущий счёт •• 4567',
+) -> parsing.TransactionRow:
+    return parsing.TransactionRow(
+        bank_id=bank_id,
+        operation_date='20.05.2026',
+        posting_date='20.05.2026',
+        description='Пополнение с текущего счёта',
+        counterparty=counterparty,
+        category='Пополнение',
+        status='Проведена',
+        amount=amount,
+    )
+
+
+def test_parse_transactions_normalizes_row_with_bank_id() -> None:
+    [transaction] = parsing.parse_transactions('savings', [make_row(bank_id='sv-0002', amount='−20 000,00 ₽')])
+
+    assert transaction == domain.Transaction(
+        transaction_id='sv-0002',
+        id_source=domain.TransactionIdSource.BANK,
+        product_id='savings',
+        operation_date=datetime.date(2026, 5, 20),
+        posting_date=datetime.date(2026, 5, 20),
+        amount=Decimal('-20000.00'),
+        currency='RUB',
+        type=domain.TransactionType.DEBIT,
+        description='Пополнение с текущего счёта',
+        counterparty='Текущий счёт •• 4567',
+        category=domain.TransactionCategory.TOP_UP,
+        status=domain.TransactionStatus.POSTED,
+    )
+
+
+def test_parse_transactions_generates_ids_when_bank_gives_none() -> None:
+    first, second = parsing.parse_transactions('savings', [make_row(), make_row()])
+
+    assert first.id_source == domain.TransactionIdSource.GENERATED
+    assert second.id_source == domain.TransactionIdSource.GENERATED
+    assert first.transaction_id.endswith('-1')
+    assert second.transaction_id.endswith('-2')
+    assert first.type == domain.TransactionType.CREDIT
+
+
+def test_parse_transactions_treats_dash_as_missing_counterparty() -> None:
+    [transaction] = parsing.parse_transactions('savings', [make_row(counterparty='—')])
+
+    assert transaction.counterparty is None
+
+
+def test_generated_id_survives_posting_of_pending_operation() -> None:
+    pending_row = make_row()
+    pending_row.posting_date = '—'
+    pending_row.status = 'В обработке'
+    posted_row = make_row()
+
+    [pending] = parsing.parse_transactions('savings', [pending_row])
+    [posted] = parsing.parse_transactions('savings', [posted_row])
+
+    assert pending.transaction_id == posted.transaction_id

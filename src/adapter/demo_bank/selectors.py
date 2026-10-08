@@ -25,3 +25,11 @@ FIELD_LINKED_ACCOUNT = 'Привязанный счёт'
 FIELD_BIC = 'БИК'
 FIELD_CORRESPONDENT_ACCOUNT = 'Корр. счёт'
 FIELD_BANK_NAME = 'Банк получателя'
+
+# История операций на странице продукта
+PERIOD_FILTER_FORM = '.period-filter'
+PERIOD_FILTER_FROM = '.period-filter input[name="from"]'
+PERIOD_FILTER_TO = '.period-filter input[name="to"]'
+PERIOD_FILTER_SUBMIT = '.period-filter button[type="submit"]'
+TRANSACTIONS_SECTION = '[data-testid="transactions"]'
+TRANSACTION_ROW = '[data-testid="transactions"] tr.transaction'

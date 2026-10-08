@@ -15,6 +15,10 @@ class Bank(typing.Protocol):
 
     async def get_products(self) -> list[domain.Product]: ...
 
+    async def get_transactions(self, product_id: str, period: domain.Period) -> domain.TransactionHistory:
+        """Операции продукта в единой схеме; фильтр периода выставляется в кабинете, если он там есть."""
+        ...
+
 
 class ClientWindow(typing.Protocol):
     async def ask_consent(self, bank_name: str, period: domain.Period, scope: list[str]) -> bool:

@@ -1,10 +1,12 @@
+import datetime
 import enum
 import secrets
 from dataclasses import dataclass, field
+from typing import Annotated
 from urllib.parse import parse_qs
 
 import pydantic
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from . import pages
@@ -90,13 +92,19 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
         return HTMLResponse(pages.products_page())
 
     @app.get('/products/{product_id}')
-    async def show_product(product_id: str, request: Request) -> Response:
+    async def show_product(
+        product_id: str,
+        request: Request,
+        # Строки, а не даты: пустое поле формы приходит как 'from='
+        date_from: Annotated[str, Query(alias='from')] = '',
+        date_to: Annotated[str, Query(alias='to')] = '',
+    ) -> Response:
         if not is_signed_in(request):
             return RedirectResponse('/login', status_code=303)
         product = PRODUCTS_BY_ID.get(product_id)
         if product is None:
             return HTMLResponse(pages.layout('Не найдено', '<h1>Продукт не найден</h1>'), status_code=404)
-        return HTMLResponse(pages.product_page(product))
+        return HTMLResponse(pages.product_page(product, _parse_query_date(date_from), _parse_query_date(date_to)))
 
     # --- Служебные адреса для тестов ---
 
@@ -118,3 +126,10 @@ async def _read_form(request: Request) -> dict[str, str]:
     """Разбор формы без python-multipart: тело application/x-www-form-urlencoded."""
     body = (await request.body()).decode()
     return {key: values[0] for key, values in parse_qs(body).items()}
+
+
+def _parse_query_date(value: str) -> datetime.date | None:
+    try:
+        return datetime.date.fromisoformat(value) if value else None
+    except ValueError:
+        return None

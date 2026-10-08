@@ -26,6 +26,7 @@ class ExtractStatementInput(pydantic.BaseModel):
 class ExtractStatementOutput(pydantic.BaseModel):
     output_folder: str
     products_count: int
+    transactions_count: int
 
 
 class PeriodOutput(pydantic.BaseModel):
@@ -100,12 +101,46 @@ class ProductOutput(pydantic.BaseModel):
         )
 
 
+class TransactionOutput(pydantic.BaseModel):
+    transaction_id: str
+    id_source: domain.TransactionIdSource
+    product_id: str
+    operation_date: datetime.date
+    posting_date: datetime.date | None
+    amount: Money = pydantic.Field(description='Минус — списание')
+    currency: str = pydantic.Field(description='Код валюты ISO 4217')
+    type: domain.TransactionType
+    description: str
+    counterparty: str | None
+    category: domain.TransactionCategory
+    status: domain.TransactionStatus
+    is_duplicate: bool
+
+    @classmethod
+    def from_domain(cls, transaction: domain.Transaction) -> TransactionOutput:
+        return cls(
+            transaction_id=transaction.transaction_id,
+            id_source=transaction.id_source,
+            product_id=transaction.product_id,
+            operation_date=transaction.operation_date,
+            posting_date=transaction.posting_date,
+            amount=transaction.amount,
+            currency=transaction.currency,
+            type=transaction.type,
+            description=transaction.description,
+            counterparty=transaction.counterparty,
+            category=transaction.category,
+            status=transaction.status,
+            is_duplicate=transaction.is_duplicate,
+        )
+
+
 class StatementOutput(pydantic.BaseModel):
     bank: str
     extracted_at: datetime.datetime
     period: PeriodOutput
     products: list[ProductOutput] = pydantic.Field(default_factory=list)
-    transactions: list[dict[str, object]] = pydantic.Field(default_factory=list)  # операции появятся в задаче #3
+    transactions: list[TransactionOutput] = pydantic.Field(default_factory=list)
 
     @classmethod
     def from_domain(cls, statement: domain.Statement) -> StatementOutput:
@@ -114,4 +149,5 @@ class StatementOutput(pydantic.BaseModel):
             extracted_at=statement.extracted_at,
             period=PeriodOutput.from_domain(statement.period),
             products=[ProductOutput.from_domain(product) for product in statement.products],
+            transactions=[TransactionOutput.from_domain(transaction) for transaction in statement.transactions],
         )
