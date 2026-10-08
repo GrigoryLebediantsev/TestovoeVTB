@@ -1,4 +1,5 @@
 from .consent import CONSENT_SCOPE, Consent
+from .consistency import ConsistencyProblems, check_statement_consistency
 from .duplicates import DuplicatePair, find_card_duplicates
 from .error import (
     AccessDeniedError,
@@ -50,6 +51,7 @@ __all__ = [
     'CONSENT_SCOPE',
     'AccessDeniedError',
     'ComparableTransaction',
+    'ConsistencyProblems',
     'Consent',
     'ConsentRefused',
     'ConsentTimeout',
@@ -90,6 +92,7 @@ __all__ = [
     'TransactionType',
     'TransactionsEvaluation',
     'build_run_folder_name',
+    'check_statement_consistency',
     'evaluate_transactions',
     'find_card_duplicates',
     'mask_number',
