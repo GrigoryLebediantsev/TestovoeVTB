@@ -144,9 +144,9 @@ class DemoBank(Bank):
         finally:
             await download.delete()
 
-        transactions = parsing.parse_export_transactions(product_id, content)
-        log.info('Export read', extra={'product_id': product_id, 'transactions_count': len(transactions)})
-        return domain.TransactionHistory(transactions=transactions, source=domain.ExtractionSource.EXPORT)
+        history = parsing.parse_export_transactions(product_id, content)
+        log.info('Export read', extra={'product_id': product_id, 'transactions_count': len(history.transactions)})
+        return history
 
     async def _read_server_history(
         self, product_id: str, filter_period: domain.Period | None, first_response: Response
@@ -172,11 +172,9 @@ class DemoBank(Bank):
             portions_count += 1
 
         log.info('History collected', extra={'product_id': product_id, 'portions_count': portions_count})
-        return domain.TransactionHistory(
-            transactions=parsing.parse_server_transactions(product_id, items),
-            source=domain.ExtractionSource.SERVER_RESPONSE,
-            warnings=warnings,
-        )
+        history = parsing.parse_server_transactions(product_id, items)
+        history.warnings.extend(warnings)
+        return history
 
     async def _has_next_portion_control(self) -> bool:
         page = self.browser.page
@@ -213,11 +211,9 @@ class DemoBank(Bank):
 
         log.info('History pages read', extra={'product_id': product_id, 'pages_count': pages_count})
         transaction_rows = [parsing.TransactionRow(**row) for row in rows]
-        return domain.TransactionHistory(
-            transactions=parsing.parse_transactions(product_id, transaction_rows),
-            source=domain.ExtractionSource.PAGE,
-            warnings=warnings,
-        )
+        history = parsing.parse_transactions(product_id, transaction_rows)
+        history.warnings.extend(warnings)
+        return history
 
     async def _apply_period_filter(self, period: domain.Period) -> bool:
         """Выставляет период в фильтре кабинета и ждёт перезагрузки истории; False — фильтра на странице нет."""

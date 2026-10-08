@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from . import pages
 from .data import PRODUCTS_BY_ID, DemoProduct, DemoTransaction, filter_by_posting_date
 from .export import build_export_csv
+from .formats import ValueFormat
 
 DEMO_LOGIN = 'demo'
 DEMO_PASSWORD = 'demo'
@@ -26,6 +27,7 @@ STATUS_CODE_BY_LABEL = {'Проведена': 'POSTED', 'В обработке':
 
 class DemoBankMode(enum.StrEnum):
     NORMAL = 'normal'
+    CHANGED_FORMAT = 'changed_format'  # даты словами, суммы с кодом валюты, один статус переименован
 
 
 @dataclass
@@ -47,6 +49,9 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
 
     def is_signed_in(request: Request) -> bool:
         return request.cookies.get(SESSION_COOKIE) in state.sessions
+
+    def current_value_format() -> ValueFormat:
+        return ValueFormat(is_changed=state.mode == DemoBankMode.CHANGED_FORMAT)
 
     @app.get('/')
     async def index() -> Response:
@@ -95,7 +100,7 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
     async def show_products(request: Request) -> Response:
         if not is_signed_in(request):
             return RedirectResponse('/login', status_code=303)
-        return HTMLResponse(pages.products_page())
+        return HTMLResponse(pages.products_page(current_value_format()))
 
     @app.get('/products/{product_id}')
     async def show_product(
@@ -112,7 +117,13 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
         if product is None:
             return HTMLResponse(pages.layout('Не найдено', '<h1>Продукт не найден</h1>'), status_code=404)
         return HTMLResponse(
-            pages.product_page(product, _parse_query_date(date_from), _parse_query_date(date_to), page_number=page)
+            pages.product_page(
+                product,
+                _parse_query_date(date_from),
+                _parse_query_date(date_to),
+                current_value_format(),
+                page_number=page,
+            )
         )
 
     @app.get('/products/{product_id}/export.csv')
@@ -131,7 +142,7 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
             product.transactions, _parse_query_date(date_from), _parse_query_date(date_to)
         )
         return Response(
-            build_export_csv(product, transactions),
+            build_export_csv(product, transactions, current_value_format()),
             media_type='text/csv; charset=utf-8',
             headers={'Content-Disposition': f'attachment; filename="{product_id}.csv"'},
         )

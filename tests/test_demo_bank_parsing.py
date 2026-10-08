@@ -43,6 +43,11 @@ SERVER_PORTION: dict[str, object] = {'items': [CARD_PURCHASE_ITEM, PENDING_REFUN
         ('-0,01 ₽', Decimal('-0.01'), 'RUB'),
         ('+50 000,00 ₽', Decimal('50000.00'), 'RUB'),
         ('500 000 ₽', Decimal('500000'), 'RUB'),
+        ('-1450.00 RUB', Decimal('-1450.00'), 'RUB'),
+        ('125430.50 RUB', Decimal('125430.50'), 'RUB'),
+        ('+500.00 USD', Decimal('500.00'), 'USD'),
+        ('99.9 EUR', Decimal('99.9'), 'EUR'),
+        ('230000 RUB', Decimal('230000'), 'RUB'),
     ],
 )
 def test_parse_money_reads_amount_and_currency(text: str, expected_amount: Decimal, expected_currency: str) -> None:
@@ -52,7 +57,9 @@ def test_parse_money_reads_amount_and_currency(text: str, expected_amount: Decim
     assert money.currency == expected_currency
 
 
-@pytest.mark.parametrize('text', ['', 'сто рублей', '125,50', '12,5 ¥'])
+@pytest.mark.parametrize(
+    'text', ['', 'сто рублей', '125,50', '12,5 ¥', '1450.00 rub', '1 450.00 RUB', '1450,00 RUB', '1450.00 ₽']
+)
 def test_parse_money_rejects_unknown_format(text: str) -> None:
     with pytest.raises(ValueError):
         parsing.parse_money(text)
@@ -66,11 +73,22 @@ def test_parse_percent(text: str, expected: Decimal) -> None:
     assert parsing.parse_percent(text) == expected
 
 
-def test_parse_date_reads_russian_numeric_date() -> None:
-    assert parsing.parse_date('15.03.2021') == datetime.date(2021, 3, 15)
+@pytest.mark.parametrize(
+    ('text', 'expected'),
+    [
+        ('15.03.2021', datetime.date(2021, 3, 15)),
+        ('10 июня 2026', datetime.date(2026, 6, 10)),
+        ('1 января 2026', datetime.date(2026, 1, 1)),
+        ('31 декабря 2025', datetime.date(2025, 12, 31)),
+        (' 3 Мая 2026 ', datetime.date(2026, 5, 3)),
+        ('20 марта 2021', datetime.date(2021, 3, 20)),
+    ],
+)
+def test_parse_date_reads_numeric_and_word_dates(text: str, expected: datetime.date) -> None:
+    assert parsing.parse_date(text) == expected
 
 
-@pytest.mark.parametrize('text', ['2021-03-15', '32.01.2021', ''])
+@pytest.mark.parametrize('text', ['2021-03-15', '32.01.2021', '', '10 июнь 2026', '31 июня 2026', 'июня 2026'])
 def test_parse_date_rejects_unknown_format(text: str) -> None:
     with pytest.raises(ValueError):
         parsing.parse_date(text)
@@ -177,9 +195,8 @@ def test_parse_transaction_status(text: str, expected: domain.TransactionStatus)
     assert parsing.parse_transaction_status(text) == expected
 
 
-def test_parse_transaction_status_rejects_unknown() -> None:
-    with pytest.raises(ValueError):
-        parsing.parse_transaction_status('Заморожена')
+def test_parse_transaction_status_turns_unknown_label_into_unknown() -> None:
+    assert parsing.parse_transaction_status('Заморожена') == domain.TransactionStatus.UNKNOWN
 
 
 @pytest.mark.parametrize(
@@ -224,7 +241,9 @@ def make_row(
 
 
 def test_parse_transactions_normalizes_row_with_bank_id() -> None:
-    [transaction] = parsing.parse_transactions('savings', [make_row(bank_id='sv-0002', amount='−20 000,00 ₽')])
+    [transaction] = parsing.parse_transactions(
+        'savings', [make_row(bank_id='sv-0002', amount='−20 000,00 ₽')]
+    ).transactions
 
     assert transaction == domain.Transaction(
         transaction_id='sv-0002',
@@ -243,7 +262,7 @@ def test_parse_transactions_normalizes_row_with_bank_id() -> None:
 
 
 def test_parse_transactions_generates_ids_when_bank_gives_none() -> None:
-    first, second = parsing.parse_transactions('savings', [make_row(), make_row()])
+    first, second = parsing.parse_transactions('savings', [make_row(), make_row()]).transactions
 
     assert first.id_source == domain.TransactionIdSource.GENERATED
     assert second.id_source == domain.TransactionIdSource.GENERATED
@@ -253,7 +272,7 @@ def test_parse_transactions_generates_ids_when_bank_gives_none() -> None:
 
 
 def test_parse_transactions_treats_dash_as_missing_counterparty() -> None:
-    [transaction] = parsing.parse_transactions('savings', [make_row(counterparty='—')])
+    [transaction] = parsing.parse_transactions('savings', [make_row(counterparty='—')]).transactions
 
     assert transaction.counterparty is None
 
@@ -264,8 +283,8 @@ def test_generated_id_survives_posting_of_pending_operation() -> None:
     pending_row.status = 'В обработке'
     posted_row = make_row()
 
-    [pending] = parsing.parse_transactions('savings', [pending_row])
-    [posted] = parsing.parse_transactions('savings', [posted_row])
+    [pending] = parsing.parse_transactions('savings', [pending_row]).transactions
+    [posted] = parsing.parse_transactions('savings', [posted_row]).transactions
 
     assert pending.transaction_id == posted.transaction_id
 
@@ -280,7 +299,7 @@ def test_parse_server_portion_reads_items_and_has_more() -> None:
 def test_parse_server_transactions_normalizes_items() -> None:
     portion = parsing.parse_server_portion(SERVER_PORTION)
 
-    with_bank_id, without_bank_id = parsing.parse_server_transactions('card-debit', portion.items)
+    with_bank_id, without_bank_id = parsing.parse_server_transactions('card-debit', portion.items).transactions
 
     assert with_bank_id == domain.Transaction(
         transaction_id='tx-c-001',
@@ -318,8 +337,8 @@ def test_server_and_page_give_same_generated_id_for_same_operation() -> None:
         amount='+640,00 ₽',
     )
 
-    [from_server] = parsing.parse_server_transactions('card-debit', [server_item])
-    [from_page] = parsing.parse_transactions('card-debit', [page_row])
+    [from_server] = parsing.parse_server_transactions('card-debit', [server_item]).transactions
+    [from_page] = parsing.parse_transactions('card-debit', [page_row]).transactions
 
     assert from_server == from_page
 
@@ -336,9 +355,8 @@ def test_parse_server_status(code: str, expected: domain.TransactionStatus) -> N
     assert parsing.parse_server_status(code) == expected
 
 
-def test_parse_server_status_rejects_unknown() -> None:
-    with pytest.raises(ValueError):
-        parsing.parse_server_status('FROZEN')
+def test_parse_server_status_turns_unknown_code_into_unknown() -> None:
+    assert parsing.parse_server_status('FROZEN') == domain.TransactionStatus.UNKNOWN
 
 
 @pytest.mark.parametrize(
@@ -386,7 +404,7 @@ def build_export_file(*lines: str) -> bytes:
 
 
 def test_parse_export_transactions_normalizes_rows() -> None:
-    [transaction] = parsing.parse_export_transactions('acc-rub', build_export_file(EXPORT_PURCHASE_LINE))
+    [transaction] = parsing.parse_export_transactions('acc-rub', build_export_file(EXPORT_PURCHASE_LINE)).transactions
 
     assert transaction == domain.Transaction(
         transaction_id=transaction.transaction_id,
@@ -416,8 +434,8 @@ def test_export_and_page_give_same_generated_id_for_same_operation() -> None:
         amount='−1 450,00 ₽',
     )
 
-    [from_export] = parsing.parse_export_transactions('acc-rub', build_export_file(EXPORT_PURCHASE_LINE))
-    [from_page] = parsing.parse_transactions('acc-rub', [page_row])
+    [from_export] = parsing.parse_export_transactions('acc-rub', build_export_file(EXPORT_PURCHASE_LINE)).transactions
+    [from_page] = parsing.parse_transactions('acc-rub', [page_row]).transactions
 
     assert from_export == from_page
 
@@ -452,3 +470,102 @@ def test_parse_export_transactions_rejects_unknown_format(content: bytes) -> Non
 )
 def test_parse_export_amount(text: str, expected: Decimal) -> None:
     assert parsing.parse_export_amount(text) == expected
+
+
+@pytest.mark.parametrize(('text', 'expected'), [('-1450.00', Decimal('-1450.00')), ('0.5', Decimal('0.5'))])
+def test_parse_export_amount_reads_dot_decimal(text: str, expected: Decimal) -> None:
+    assert parsing.parse_export_amount(text) == expected
+
+
+# Та же операция в изменённом формате кабинета: даты словами, сумма с точкой и кодом валюты
+CHANGED_FORMAT_PAGE_ROW = parsing.TransactionRow(
+    bank_id=None,
+    operation_date='3 мая 2026',
+    posting_date='4 мая 2026',
+    description='Покупка по карте •• 9012: Пятёрочка',
+    counterparty='Пятёрочка',
+    category='Супермаркеты',
+    status='Проведена',
+    amount='-1450.00 RUB',
+)
+CHANGED_FORMAT_EXPORT_LINE = (
+    '3 мая 2026;4 мая 2026;Покупка по карте •• 9012: Пятёрочка;Пятёрочка;Супермаркеты;Проведена;-1450.00;RUB'
+)
+
+
+def test_page_rows_in_both_formats_give_same_transaction() -> None:
+    normal_row = parsing.TransactionRow(
+        bank_id=None,
+        operation_date='03.05.2026',
+        posting_date='04.05.2026',
+        description='Покупка по карте •• 9012: Пятёрочка',
+        counterparty='Пятёрочка',
+        category='Супермаркеты',
+        status='Проведена',
+        amount='−1 450,00 ₽',
+    )
+
+    normal = parsing.parse_transactions('acc-rub', [normal_row])
+    changed = parsing.parse_transactions('acc-rub', [CHANGED_FORMAT_PAGE_ROW])
+
+    assert changed == normal
+
+
+def test_export_files_in_both_formats_give_same_transaction() -> None:
+    normal = parsing.parse_export_transactions('acc-rub', build_export_file(EXPORT_PURCHASE_LINE))
+    changed = parsing.parse_export_transactions('acc-rub', build_export_file(CHANGED_FORMAT_EXPORT_LINE))
+
+    assert changed == normal
+
+
+def test_parse_product_reads_changed_format_fields() -> None:
+    fields = {
+        'Тип': parsing.ProductField(text='Кредит'),
+        'Остаток долга': parsing.ProductField(text='230000.00 RUB'),
+        'Дата открытия': parsing.ProductField(text='1 февраля 2025'),
+    }
+
+    product = parsing.parse_product('loan', 'Потребительский кредит', fields)
+
+    assert product.currency == 'RUB'
+    assert product.details.debt == Decimal('230000.00')
+    assert product.details.opened_at == datetime.date(2025, 2, 1)
+
+
+def test_parse_transactions_warns_about_unknown_status_with_its_label() -> None:
+    renamed_status_row = make_row()
+    renamed_status_row.status = 'Исполнена'
+
+    history = parsing.parse_transactions('savings', [make_row(), renamed_status_row, renamed_status_row])
+
+    assert history.source == domain.ExtractionSource.PAGE
+    assert [transaction.status for transaction in history.transactions] == [
+        domain.TransactionStatus.POSTED,
+        domain.TransactionStatus.UNKNOWN,
+        domain.TransactionStatus.UNKNOWN,
+    ]
+    assert history.warnings == ['Продукт savings: незнакомый статус операции «Исполнена»: 2']
+
+
+def test_parse_transactions_without_unknown_status_has_no_warnings() -> None:
+    assert parsing.parse_transactions('savings', [make_row()]).warnings == []
+
+
+def test_parse_server_transactions_warns_about_unknown_status_code() -> None:
+    portion = parsing.parse_server_portion({'items': [CARD_PURCHASE_ITEM | {'status': 'FROZEN'}], 'hasMore': False})
+
+    history = parsing.parse_server_transactions('card-debit', portion.items)
+
+    assert history.source == domain.ExtractionSource.SERVER_RESPONSE
+    assert history.transactions[0].status == domain.TransactionStatus.UNKNOWN
+    assert history.warnings == ['Продукт card-debit: незнакомый статус операции «FROZEN»: 1']
+
+
+def test_parse_export_transactions_warns_about_unknown_status() -> None:
+    content = build_export_file(EXPORT_PURCHASE_LINE.replace(';Проведена;', ';Заморожена;'))
+
+    history = parsing.parse_export_transactions('acc-rub', content)
+
+    assert history.source == domain.ExtractionSource.EXPORT
+    assert history.transactions[0].status == domain.TransactionStatus.UNKNOWN
+    assert history.warnings == ['Продукт acc-rub: незнакомый статус операции «Заморожена»: 1']

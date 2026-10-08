@@ -1,6 +1,7 @@
 """HTML-страницы кабинета демо-банка."""
 
 import datetime
+import json
 from decimal import Decimal
 from html import escape
 from urllib.parse import urlencode
@@ -17,8 +18,7 @@ from .data import (
     HistoryLoading,
     filter_by_posting_date,
 )
-
-CURRENCY_SYMBOLS = {'RUB': '₽', 'USD': '$', 'EUR': '€'}
+from .formats import CURRENCY_SYMBOLS, MONTH_NAMES_GENITIVE, ValueFormat
 
 STYLE = """
 body { font-family: sans-serif; margin: 0; background: #f4f5f7; color: #1d1d1f; }
@@ -45,22 +45,8 @@ button { margin-top: 16px; padding: 8px 16px; }
 EMPTY_CELL = '—'
 
 
-def format_money(amount: Decimal, currency: str, show_plus: bool = False) -> str:
-    """125430.50, RUB → '125 430,50 ₽' (пробел-разделитель тысяч — неразрывный)."""
-    sign = '−' if amount < 0 else ''
-    if show_plus and amount > 0:
-        sign = '+'
-    integer_part, fraction_part = f'{abs(amount):.2f}'.split('.')
-    grouped = f'{int(integer_part):,}'.replace(',', ' ')
-    return f'{sign}{grouped},{fraction_part} {CURRENCY_SYMBOLS[currency]}'
-
-
 def format_percent(value: Decimal) -> str:
     return f'{value}'.replace('.', ',') + ' %'
-
-
-def format_date(value: datetime.date) -> str:
-    return value.strftime('%d.%m.%Y')
 
 
 def short_number(number: str) -> str:
@@ -111,8 +97,8 @@ def one_time_code_page(error: str | None = None) -> str:
     )
 
 
-def products_page() -> str:
-    items = ''.join(_product_card(product) for product in PRODUCTS)
+def products_page(value_format: ValueFormat) -> str:
+    items = ''.join(_product_card(product, value_format) for product in PRODUCTS)
     return layout(
         'Мои продукты',
         f'<h1>Мои продукты</h1><ul class="products-list" data-testid="products-list">{items}</ul>',
@@ -120,10 +106,10 @@ def products_page() -> str:
     )
 
 
-def _product_card(product: DemoProduct) -> str:
+def _product_card(product: DemoProduct, value_format: ValueFormat) -> str:
     number = product.card_number or product.account_number or ''
     amount = product.balance if product.balance is not None else product.debt
-    amount_text = format_money(amount, product.currency) if amount is not None else ''
+    amount_text = value_format.money(amount, product.currency) if amount is not None else ''
     return f"""<li class="product-card">
   <a class="product-link" href="/products/{escape(product.product_id)}">{escape(product.name)}</a>
   <span class="product-number">{escape(short_number(number))}</span>
@@ -132,7 +118,11 @@ def _product_card(product: DemoProduct) -> str:
 
 
 def product_page(
-    product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None, page_number: int = 1
+    product: DemoProduct,
+    date_from: datetime.date | None,
+    date_to: datetime.date | None,
+    value_format: ValueFormat,
+    page_number: int = 1,
 ) -> str:
     fields: list[tuple[str, str]] = [('Тип', escape(product.type_label))]
     if product.card_number:
@@ -140,16 +130,16 @@ def product_page(
     if product.account_number:
         fields.append(('Номер счёта', escape(product.account_number)))
     if product.balance is not None:
-        fields.append(('Баланс', escape(format_money(product.balance, product.currency))))
+        fields.append(('Баланс', escape(value_format.money(product.balance, product.currency))))
     if product.available_balance is not None:
-        fields.append(('Доступно', escape(format_money(product.available_balance, product.currency))))
+        fields.append(('Доступно', escape(value_format.money(product.available_balance, product.currency))))
     if product.credit_limit is not None:
-        fields.append(('Кредитный лимит', escape(format_money(product.credit_limit, product.currency))))
+        fields.append(('Кредитный лимит', escape(value_format.money(product.credit_limit, product.currency))))
     if product.debt is not None:
-        fields.append(('Остаток долга', escape(format_money(product.debt, product.currency))))
+        fields.append(('Остаток долга', escape(value_format.money(product.debt, product.currency))))
     if product.interest_rate is not None:
         fields.append(('Ставка', escape(format_percent(product.interest_rate))))
-    fields.append(('Дата открытия', escape(format_date(product.opened_at))))
+    fields.append(('Дата открытия', escape(value_format.date(product.opened_at))))
     if product.linked_product_id:
         linked = PRODUCTS_BY_ID[product.linked_product_id]
         link_text = f'{linked.name} {short_number(linked.account_number or "")}'
@@ -167,7 +157,7 @@ def product_page(
   <h1 class="product-title">{escape(product.name)}</h1>
   <dl class="product-fields">{rows}</dl>
 </section>
-{_transactions_section(product, date_from, date_to, page_number)}""",
+{_transactions_section(product, date_from, date_to, value_format, page_number)}""",
         signed_in=True,
     )
 
@@ -177,21 +167,30 @@ TRANSACTIONS_TABLE_HEAD = """<thead><tr><th>Дата</th><th>Проведена<
 EMPTY_HISTORY = '<p class="transactions-empty">Операций нет</p>'
 HISTORY_PAGE_SIZE = 4
 
-# Подгрузка истории порциями: страница сама запрашивает сервер и дописывает строки в таблицу
+# Подгрузка истории порциями: страница сама запрашивает сервер и дописывает строки в таблицу.
+# Даты и суммы показывает в том же формате, что и остальной кабинет (обычном или изменённом).
 PORTION_LOADER_SCRIPT = """<script>
 (() => {
   const section = document.querySelector('[data-testid="transactions"]');
   const tableBody = section.querySelector('tbody');
   const pageQuery = new URLSearchParams(location.search);
-  const currencySymbols = {RUB: '₽', USD: '$', EUR: '€'};
+  const currencySymbols = __CURRENCY_SYMBOLS__;
+  const monthNames = __MONTH_NAMES__;
+  const isChangedFormat = __IS_CHANGED_FORMAT__;
   const statusLabels = {POSTED: 'Проведена', PENDING: 'В обработке', DECLINED: 'Отклонена'};
   let offset = 0;
   let hasMore = true;
   let isLoading = false;
 
-  const formatDate = value => value ? value.split('-').reverse().join('.') : '—';
+  const formatDate = value => {
+    if (!value) return '—';
+    const [year, month, day] = value.split('-');
+    if (isChangedFormat) return `${Number(day)} ${monthNames[Number(month) - 1]} ${year}`;
+    return `${day}.${month}.${year}`;
+  };
   const formatMoney = (amount, currency) => {
     const number = Number(amount);
+    if (isChangedFormat) return `${number.toFixed(2)} ${currency}`;
     const sign = number < 0 ? '−' : number > 0 ? '+' : '';
     const [integerPart, fractionPart] = Math.abs(number).toFixed(2).split('.');
     const grouped = integerPart.replace(/\\B(?=(\\d{3})+(?!\\d))/g, '\u00a0');
@@ -251,17 +250,29 @@ PORTION_LOADER_SCRIPT = """<script>
 </script>""".replace('__EMPTY_HISTORY__', EMPTY_HISTORY)
 
 
+def _portion_loader_script(value_format: ValueFormat) -> str:
+    return (
+        PORTION_LOADER_SCRIPT.replace('__CURRENCY_SYMBOLS__', json.dumps(CURRENCY_SYMBOLS))
+        .replace('__MONTH_NAMES__', json.dumps(MONTH_NAMES_GENITIVE))
+        .replace('__IS_CHANGED_FORMAT__', json.dumps(value_format.is_changed))
+    )
+
+
 def _transactions_section(
-    product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None, page_number: int
+    product: DemoProduct,
+    date_from: datetime.date | None,
+    date_to: datetime.date | None,
+    value_format: ValueFormat,
+    page_number: int,
 ) -> str:
     if product.history_loading == HistoryLoading.PAGE:
-        history = _render_page_history(product, date_from, date_to)
+        history = _render_page_history(product, date_from, date_to, value_format)
         state = 'ready'
     elif product.history_loading == HistoryLoading.NUMBERED_PAGES:
-        history = _render_numbered_history(product, date_from, date_to, page_number)
+        history = _render_numbered_history(product, date_from, date_to, value_format, page_number)
         state = 'ready'
     else:
-        history = _render_portion_history(product.history_loading)
+        history = _render_portion_history(product.history_loading, value_format)
         state = 'loading'
     from_value = date_from.isoformat() if date_from else ''
     to_value = date_to.isoformat() if date_to else ''
@@ -285,16 +296,22 @@ def _transactions_section(
 </section>"""
 
 
-def _render_page_history(product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None) -> str:
+def _render_page_history(
+    product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None, value_format: ValueFormat
+) -> str:
     transactions = filter_by_posting_date(product.transactions, date_from, date_to)
     if not transactions:
         return EMPTY_HISTORY
-    rows = ''.join(_transaction_row(transaction, product.currency) for transaction in transactions)
+    rows = ''.join(_transaction_row(transaction, product.currency, value_format) for transaction in transactions)
     return f'<table class="transactions-table">{TRANSACTIONS_TABLE_HEAD}<tbody>{rows}</tbody></table>'
 
 
 def _render_numbered_history(
-    product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None, page_number: int
+    product: DemoProduct,
+    date_from: datetime.date | None,
+    date_to: datetime.date | None,
+    value_format: ValueFormat,
+    page_number: int,
 ) -> str:
     """История по страницам; ссылки страниц сохраняют фильтр периода."""
     transactions = filter_by_posting_date(product.transactions, date_from, date_to)
@@ -304,7 +321,7 @@ def _render_numbered_history(
     current_page = min(max(page_number, 1), pages_count)
     start = (current_page - 1) * HISTORY_PAGE_SIZE
     page_transactions = transactions[start : start + HISTORY_PAGE_SIZE]
-    rows = ''.join(_transaction_row(transaction, product.currency) for transaction in page_transactions)
+    rows = ''.join(_transaction_row(transaction, product.currency, value_format) for transaction in page_transactions)
 
     def page_href(number: int) -> str:
         query = {'from': date_from.isoformat() if date_from else '', 'to': date_to.isoformat() if date_to else ''}
@@ -322,7 +339,7 @@ def _render_numbered_history(
 <nav class="pagination">{''.join(page_items)}</nav>"""
 
 
-def _render_portion_history(history_loading: HistoryLoading) -> str:
+def _render_portion_history(history_loading: HistoryLoading, value_format: ValueFormat) -> str:
     if history_loading == HistoryLoading.SHOW_MORE:
         more_control = '<button type="button" class="show-more">Показать ещё</button>'
     else:
@@ -330,18 +347,18 @@ def _render_portion_history(history_loading: HistoryLoading) -> str:
     return f"""<table class="transactions-table">{TRANSACTIONS_TABLE_HEAD}<tbody></tbody></table>
 <div class="transactions-status"></div>
 {more_control}
-{PORTION_LOADER_SCRIPT}"""
+{_portion_loader_script(value_format)}"""
 
 
-def _transaction_row(transaction: DemoTransaction, currency: str) -> str:
+def _transaction_row(transaction: DemoTransaction, currency: str, value_format: ValueFormat) -> str:
     id_attribute = f' data-transaction-id="{escape(transaction.bank_id)}"' if transaction.bank_id else ''
-    posting_date = format_date(transaction.posting_date) if transaction.posting_date else EMPTY_CELL
+    posting_date = value_format.date(transaction.posting_date) if transaction.posting_date else EMPTY_CELL
     return f"""<tr class="transaction"{id_attribute}>
-  <td class="transaction-date">{format_date(transaction.operation_date)}</td>
+  <td class="transaction-date">{value_format.date(transaction.operation_date)}</td>
   <td class="transaction-posting-date">{posting_date}</td>
   <td class="transaction-description">{escape(transaction.description)}</td>
   <td class="transaction-counterparty">{escape(transaction.counterparty or EMPTY_CELL)}</td>
   <td class="transaction-category">{escape(transaction.category)}</td>
-  <td class="transaction-status">{escape(transaction.status)}</td>
-  <td class="transaction-amount">{escape(format_money(transaction.amount, currency, show_plus=True))}</td>
+  <td class="transaction-status">{escape(value_format.status(transaction))}</td>
+  <td class="transaction-amount">{escape(value_format.money(transaction.amount, currency, show_plus=True))}</td>
 </tr>"""

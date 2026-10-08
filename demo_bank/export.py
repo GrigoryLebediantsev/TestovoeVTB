@@ -4,6 +4,7 @@ import csv
 import io
 
 from .data import DemoProduct, DemoTransaction
+from .formats import ValueFormat
 
 EXPORT_COLUMNS = [
     'Дата операции',
@@ -17,25 +18,27 @@ EXPORT_COLUMNS = [
 ]
 # BOM — чтобы файл с кириллицей правильно открывался в Excel
 EXPORT_ENCODING = 'utf-8-sig'
-EXPORT_DATE_FORMAT = '%d.%m.%Y'
 
 
-def build_export_csv(product: DemoProduct, transactions: list[DemoTransaction]) -> bytes:
-    """Файл экспорта: разделитель «;», даты ДД.ММ.ГГГГ, сумма с запятой '-1450,00', валюта кодом."""
+def build_export_csv(product: DemoProduct, transactions: list[DemoTransaction], value_format: ValueFormat) -> bytes:
+    """Файл экспорта: разделитель «;», валюта кодом; даты и сумма — в формате кабинета.
+
+    Обычный формат: '03.05.2026', '-1450,00'. Изменённый: '3 мая 2026', '-1450.00'.
+    """
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=';', lineterminator='\r\n')
     writer.writerow(EXPORT_COLUMNS)
     for transaction in transactions:
-        posting_date = transaction.posting_date.strftime(EXPORT_DATE_FORMAT) if transaction.posting_date else ''
+        posting_date = value_format.date(transaction.posting_date) if transaction.posting_date else ''
         writer.writerow(
             [
-                transaction.operation_date.strftime(EXPORT_DATE_FORMAT),
+                value_format.date(transaction.operation_date),
                 posting_date,
                 transaction.description,
                 transaction.counterparty or '',
                 transaction.category,
-                transaction.status,
-                f'{transaction.amount:.2f}'.replace('.', ','),
+                value_format.status(transaction),
+                value_format.export_amount(transaction.amount),
                 product.currency,
             ]
         )

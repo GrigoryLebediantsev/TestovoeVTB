@@ -4,6 +4,7 @@ import csv
 import datetime
 import io
 import re
+from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
@@ -64,11 +65,30 @@ EMPTY_CELL_TEXT = '—'
 MONEY_PATTERN = re.compile(
     r'^(?P<sign>[-−+]?)(?P<integer>\d{1,3}(?: \d{3})*|\d+)(?:,(?P<fraction>\d{1,2}))? (?P<symbol>\S)$'
 )
+# Изменённый формат кабинета: '-1450.00 RUB' — знак, цифры без разделителей, копейки через точку, код валюты
+CODE_MONEY_PATTERN = re.compile(r'^(?P<sign>[-−+]?)(?P<integer>\d+)(?:\.(?P<fraction>\d{1,2}))? (?P<code>[A-Z]{3})$')
 MINUS_SIGNS = ('-', '−')
 PERCENT_PATTERN = re.compile(r'^(?P<number>\d+(?:,\d+)?) ?%$')
 DATE_FORMAT = '%d.%m.%Y'
-# Сумма в экспорте: '-1450,00' — без разделителей тысяч и символа валюты, валюта отдельной колонкой
-EXPORT_AMOUNT_PATTERN = re.compile(r'^(?P<sign>-?)(?P<integer>\d+)(?:,(?P<fraction>\d{1,2}))?$')
+# Изменённый формат кабинета: '10 июня 2026' — месяц словом в родительном падеже
+WORD_DATE_PATTERN = re.compile(r'^(?P<day>\d{1,2}) (?P<month>\S+) (?P<year>\d{4})$')
+MONTH_NUMBER_BY_NAME = {
+    'января': 1,
+    'февраля': 2,
+    'марта': 3,
+    'апреля': 4,
+    'мая': 5,
+    'июня': 6,
+    'июля': 7,
+    'августа': 8,
+    'сентября': 9,
+    'октября': 10,
+    'ноября': 11,
+    'декабря': 12,
+}
+# Сумма в экспорте: '-1450,00' (в изменённом формате '-1450.00') — без разделителей тысяч и символа валюты,
+# валюта отдельной колонкой
+EXPORT_AMOUNT_PATTERN = re.compile(r'^(?P<sign>-?)(?P<integer>\d+)(?:[,.](?P<fraction>\d{1,2}))?$')
 CURRENCY_CODE_PATTERN = re.compile(r'^[A-Z]{3}$')
 EXPORT_COLUMNS = [
     selectors.EXPORT_COLUMN_OPERATION_DATE,
@@ -134,7 +154,13 @@ class ParsedMoney:
 
 
 def parse_money(text: str) -> ParsedMoney:
-    match = MONEY_PATTERN.match(_normalize_spaces(text))
+    """Сумма в любом из двух форматов кабинета: '−1 450,00 ₽' или '-1450.00 RUB'."""
+    normalized_text = _normalize_spaces(text)
+    code_match = CODE_MONEY_PATTERN.match(normalized_text)
+    if code_match:
+        return ParsedMoney(amount=_build_amount(code_match), currency=code_match['code'])
+
+    match = MONEY_PATTERN.match(normalized_text)
     if not match:
         # Значение не пишем в текст ошибки: суммы не должны попадать в логи
         raise ValueError('Unknown money format')
@@ -142,14 +168,18 @@ def parse_money(text: str) -> ParsedMoney:
     currency = CURRENCY_BY_SYMBOL.get(match['symbol'])
     if not currency:
         raise ValueError('Unknown currency symbol')
+    return ParsedMoney(amount=_build_amount(match), currency=currency)
 
+
+def _build_amount(match: re.Match[str]) -> Decimal:
+    """Число из групп sign, integer и fraction шаблона суммы."""
     number = match['integer'].replace(' ', '')
     if match['fraction']:
         number = f'{number}.{match["fraction"]}'
     amount = Decimal(number)
     if match['sign'] in MINUS_SIGNS:
         amount = -amount
-    return ParsedMoney(amount=amount, currency=currency)
+    return amount
 
 
 def parse_percent(text: str) -> Decimal:
@@ -160,7 +190,16 @@ def parse_percent(text: str) -> Decimal:
 
 
 def parse_date(text: str) -> datetime.date:
-    return datetime.datetime.strptime(text.strip(), DATE_FORMAT).date()
+    """Дата в любом из двух форматов кабинета: '10.06.2026' или '10 июня 2026'."""
+    normalized_text = _normalize_spaces(text)
+    word_match = WORD_DATE_PATTERN.match(normalized_text)
+    if not word_match:
+        return datetime.datetime.strptime(normalized_text, DATE_FORMAT).date()
+
+    month = MONTH_NUMBER_BY_NAME.get(word_match['month'].lower())
+    if not month:
+        raise ValueError(f'Unknown month name: {word_match["month"]!r}')
+    return datetime.date(int(word_match['year']), month, int(word_match['day']))
 
 
 def parse_optional_date(text: str) -> datetime.date | None:
@@ -170,10 +209,7 @@ def parse_optional_date(text: str) -> datetime.date | None:
 
 
 def parse_transaction_status(text: str) -> domain.TransactionStatus:
-    status = TRANSACTION_STATUS_BY_LABEL.get(text.strip().lower())
-    if not status:
-        raise ValueError(f'Unknown transaction status: {text!r}')
-    return status
+    return TRANSACTION_STATUS_BY_LABEL.get(text.strip().lower(), domain.TransactionStatus.UNKNOWN)
 
 
 def parse_transaction_category(text: str) -> domain.TransactionCategory:
@@ -181,10 +217,7 @@ def parse_transaction_category(text: str) -> domain.TransactionCategory:
 
 
 def parse_server_status(code: str) -> domain.TransactionStatus:
-    status = TRANSACTION_STATUS_BY_SERVER_CODE.get(code.strip().upper())
-    if not status:
-        raise ValueError(f'Unknown transaction status code: {code!r}')
-    return status
+    return TRANSACTION_STATUS_BY_SERVER_CODE.get(code.strip().upper(), domain.TransactionStatus.UNKNOWN)
 
 
 def is_history_response_url(url: str, product_id: str, period: domain.Period | None) -> bool:
@@ -205,16 +238,26 @@ def parse_server_portion(data: object) -> FetchTransactionsResponse:
     return FetchTransactionsResponse.model_validate(data)
 
 
-def parse_server_transactions(product_id: str, items: list[FetchedTransaction]) -> list[domain.Transaction]:
+def parse_server_transactions(product_id: str, items: list[FetchedTransaction]) -> domain.TransactionHistory:
     """Приводит операции из ответов сервера к единой схеме; items — все порции истории продукта по порядку."""
     id_generator = domain.TransactionIdGenerator()
-    return [_parse_server_transaction(product_id, item, id_generator) for item in items]
+    transactions = [_parse_server_transaction(product_id, item, id_generator) for item in items]
+    return domain.TransactionHistory(
+        transactions=transactions,
+        source=domain.ExtractionSource.SERVER_RESPONSE,
+        warnings=_build_unknown_status_warnings(product_id, transactions, [item.status for item in items]),
+    )
 
 
-def parse_transactions(product_id: str, rows: list[TransactionRow]) -> list[domain.Transaction]:
+def parse_transactions(product_id: str, rows: list[TransactionRow]) -> domain.TransactionHistory:
     """Приводит строки таблицы к единой схеме; операциям без банковского идентификатора генерирует устойчивый."""
     id_generator = domain.TransactionIdGenerator()
-    return [_parse_transaction(product_id, row, id_generator) for row in rows]
+    transactions = [_parse_transaction(product_id, row, id_generator) for row in rows]
+    return domain.TransactionHistory(
+        transactions=transactions,
+        source=domain.ExtractionSource.PAGE,
+        warnings=_build_unknown_status_warnings(product_id, transactions, [row.status for row in rows]),
+    )
 
 
 def parse_export_amount(text: str) -> Decimal:
@@ -228,7 +271,7 @@ def parse_export_amount(text: str) -> Decimal:
     return -amount if match['sign'] else amount
 
 
-def parse_export_transactions(product_id: str, content: bytes) -> list[domain.Transaction]:
+def parse_export_transactions(product_id: str, content: bytes) -> domain.TransactionHistory:
     """Приводит файл экспорта CSV к единой схеме; у операций в экспорте нет банковского идентификатора.
 
     Незнакомый формат файла — ValueError: адаптер тогда переходит к следующему способу извлечения.
@@ -237,10 +280,18 @@ def parse_export_transactions(product_id: str, content: bytes) -> list[domain.Tr
     try:
         if reader.fieldnames is None or not set(EXPORT_COLUMNS) <= set(reader.fieldnames):
             raise ValueError('Unknown export columns')
-        id_generator = domain.TransactionIdGenerator()
-        return [_parse_export_row(product_id, row, id_generator) for row in reader]
+        rows = list(reader)
     except csv.Error as error:
         raise ValueError('Broken export file') from error
+
+    id_generator = domain.TransactionIdGenerator()
+    transactions = [_parse_export_row(product_id, row, id_generator) for row in rows]
+    status_texts = [row[selectors.EXPORT_COLUMN_STATUS] for row in rows]
+    return domain.TransactionHistory(
+        transactions=transactions,
+        source=domain.ExtractionSource.EXPORT,
+        warnings=_build_unknown_status_warnings(product_id, transactions, status_texts),
+    )
 
 
 def parse_product_type(text: str) -> domain.ProductType:
@@ -382,6 +433,21 @@ def _parse_export_row(
         category=parse_transaction_category(row[selectors.EXPORT_COLUMN_CATEGORY]),
         status=parse_transaction_status(row[selectors.EXPORT_COLUMN_STATUS]),
     )
+
+
+def _build_unknown_status_warnings(
+    product_id: str, transactions: list[domain.Transaction], status_texts: list[str]
+) -> list[str]:
+    """Предупреждения о незнакомых статусах с исходной подписью банка — подсказка, что добавить в словарь."""
+    unknown_counts = Counter(
+        _normalize_spaces(status_text)
+        for transaction, status_text in zip(transactions, status_texts, strict=True)
+        if transaction.status == domain.TransactionStatus.UNKNOWN
+    )
+    return [
+        f'Продукт {product_id}: незнакомый статус операции «{status_text}»: {count}'
+        for status_text, count in unknown_counts.items()
+    ]
 
 
 def _is_empty_cell(text: str) -> bool:
