@@ -372,3 +372,83 @@ def test_parse_server_portion_rejects_unknown_format(broken_item: dict[str, obje
 )
 def test_is_history_response_url(url: str, period: domain.Period | None, expected: bool) -> None:
     assert parsing.is_history_response_url(url, 'card-debit', period) == expected
+
+
+EXPORT_HEADER = 'Дата операции;Дата проведения;Описание;Контрагент;Категория;Статус;Сумма;Валюта'
+EXPORT_PURCHASE_LINE = (
+    '03.05.2026;04.05.2026;Покупка по карте •• 9012: Пятёрочка;Пятёрочка;Супермаркеты;Проведена;-1450,00;RUB'
+)
+
+
+def build_export_file(*lines: str) -> bytes:
+    """Файл экспорта, как его отдаёт кабинет: UTF-8 с BOM, строки через CRLF."""
+    return ('﻿' + '\r\n'.join([EXPORT_HEADER, *lines]) + '\r\n').encode('utf-8')
+
+
+def test_parse_export_transactions_normalizes_rows() -> None:
+    [transaction] = parsing.parse_export_transactions('acc-rub', build_export_file(EXPORT_PURCHASE_LINE))
+
+    assert transaction == domain.Transaction(
+        transaction_id=transaction.transaction_id,
+        id_source=domain.TransactionIdSource.GENERATED,
+        product_id='acc-rub',
+        operation_date=datetime.date(2026, 5, 3),
+        posting_date=datetime.date(2026, 5, 4),
+        amount=Decimal('-1450.00'),
+        currency='RUB',
+        type=domain.TransactionType.DEBIT,
+        description='Покупка по карте •• 9012: Пятёрочка',
+        counterparty='Пятёрочка',
+        category=domain.TransactionCategory.GROCERIES,
+        status=domain.TransactionStatus.POSTED,
+    )
+
+
+def test_export_and_page_give_same_generated_id_for_same_operation() -> None:
+    page_row = parsing.TransactionRow(
+        bank_id=None,
+        operation_date='03.05.2026',
+        posting_date='04.05.2026',
+        description='Покупка по карте •• 9012: Пятёрочка',
+        counterparty='Пятёрочка',
+        category='Супермаркеты',
+        status='Проведена',
+        amount='−1 450,00 ₽',
+    )
+
+    [from_export] = parsing.parse_export_transactions('acc-rub', build_export_file(EXPORT_PURCHASE_LINE))
+    [from_page] = parsing.parse_transactions('acc-rub', [page_row])
+
+    assert from_export == from_page
+
+
+@pytest.mark.parametrize(
+    'content',
+    [
+        b'',
+        'Дата;Сумма\r\n03.05.2026;-1450,00\r\n'.encode(),
+        build_export_file('03.05.2026;04.05.2026;Пятёрочка;Пятёрочка;Супермаркеты;Проведена'),
+        build_export_file(EXPORT_PURCHASE_LINE.replace('-1450,00', '−1 450,00 ₽')),
+        build_export_file(EXPORT_PURCHASE_LINE.replace(';RUB', ';₽')),
+        '\r\n'.join([EXPORT_HEADER, EXPORT_PURCHASE_LINE]).encode('cp1251'),
+        # Поле длиннее предела модуля csv
+        build_export_file(EXPORT_PURCHASE_LINE.replace('Пятёрочка;', 'Я' * 200_000 + ';', 1)),
+    ],
+    ids=['empty', 'unknown columns', 'short row', 'page amount format', 'currency symbol', 'not utf-8', 'huge field'],
+)
+def test_parse_export_transactions_rejects_unknown_format(content: bytes) -> None:
+    with pytest.raises(ValueError):
+        parsing.parse_export_transactions('acc-rub', content)
+
+
+@pytest.mark.parametrize(
+    ('text', 'expected'),
+    [
+        ('-1450,00', Decimal('-1450.00')),
+        ('85000,00', Decimal('85000.00')),
+        ('0,5', Decimal('0.5')),
+        ('100', Decimal('100')),
+    ],
+)
+def test_parse_export_amount(text: str, expected: Decimal) -> None:
+    assert parsing.parse_export_amount(text) == expected

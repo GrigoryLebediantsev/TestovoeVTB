@@ -3,6 +3,7 @@
 import datetime
 from decimal import Decimal
 from html import escape
+from urllib.parse import urlencode
 
 from .data import (
     BANK_BIC,
@@ -37,6 +38,7 @@ button { margin-top: 16px; padding: 8px 16px; }
 .transactions-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .transactions-table td, .transactions-table th { border-bottom: 1px solid #ddd; padding: 6px 4px; text-align: left; }
 .scroll-spacer { height: 100vh; }
+.pagination { display: flex; gap: 8px; margin-top: 12px; }
 """
 
 
@@ -129,7 +131,9 @@ def _product_card(product: DemoProduct) -> str:
 </li>"""
 
 
-def product_page(product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None) -> str:
+def product_page(
+    product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None, page_number: int = 1
+) -> str:
     fields: list[tuple[str, str]] = [('Тип', escape(product.type_label))]
     if product.card_number:
         fields.append(('Номер карты', escape(format_card_number(product.card_number))))
@@ -163,7 +167,7 @@ def product_page(product: DemoProduct, date_from: datetime.date | None, date_to:
   <h1 class="product-title">{escape(product.name)}</h1>
   <dl class="product-fields">{rows}</dl>
 </section>
-{_transactions_section(product, date_from, date_to)}""",
+{_transactions_section(product, date_from, date_to, page_number)}""",
         signed_in=True,
     )
 
@@ -171,6 +175,7 @@ def product_page(product: DemoProduct, date_from: datetime.date | None, date_to:
 TRANSACTIONS_TABLE_HEAD = """<thead><tr><th>Дата</th><th>Проведена</th><th>Описание</th><th>Контрагент</th>
 <th>Категория</th><th>Статус</th><th>Сумма</th></tr></thead>"""
 EMPTY_HISTORY = '<p class="transactions-empty">Операций нет</p>'
+HISTORY_PAGE_SIZE = 4
 
 # Подгрузка истории порциями: страница сама запрашивает сервер и дописывает строки в таблицу
 PORTION_LOADER_SCRIPT = """<script>
@@ -246,15 +251,27 @@ PORTION_LOADER_SCRIPT = """<script>
 </script>""".replace('__EMPTY_HISTORY__', EMPTY_HISTORY)
 
 
-def _transactions_section(product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None) -> str:
+def _transactions_section(
+    product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None, page_number: int
+) -> str:
     if product.history_loading == HistoryLoading.PAGE:
         history = _render_page_history(product, date_from, date_to)
+        state = 'ready'
+    elif product.history_loading == HistoryLoading.NUMBERED_PAGES:
+        history = _render_numbered_history(product, date_from, date_to, page_number)
         state = 'ready'
     else:
         history = _render_portion_history(product.history_loading)
         state = 'loading'
     from_value = date_from.isoformat() if date_from else ''
     to_value = date_to.isoformat() if date_to else ''
+    export_link = ''
+    if product.has_export:
+        export_query = urlencode({'from': from_value, 'to': to_value})
+        export_link = (
+            f'<p><a class="export-csv" href="/products/{escape(product.product_id)}/export.csv?{export_query}">'
+            'Скачать выписку CSV</a></p>'
+        )
     return f"""<section class="transactions" data-testid="transactions" data-state="{state}"
   data-product-id="{escape(product.product_id)}">
 <h2>Операции</h2>
@@ -263,6 +280,7 @@ def _transactions_section(product: DemoProduct, date_from: datetime.date | None,
   <label>По <input name="to" type="date" value="{to_value}"></label>
   <button type="submit">Показать</button>
 </form>
+{export_link}
 {history}
 </section>"""
 
@@ -273,6 +291,35 @@ def _render_page_history(product: DemoProduct, date_from: datetime.date | None, 
         return EMPTY_HISTORY
     rows = ''.join(_transaction_row(transaction, product.currency) for transaction in transactions)
     return f'<table class="transactions-table">{TRANSACTIONS_TABLE_HEAD}<tbody>{rows}</tbody></table>'
+
+
+def _render_numbered_history(
+    product: DemoProduct, date_from: datetime.date | None, date_to: datetime.date | None, page_number: int
+) -> str:
+    """История по страницам; ссылки страниц сохраняют фильтр периода."""
+    transactions = filter_by_posting_date(product.transactions, date_from, date_to)
+    if not transactions:
+        return EMPTY_HISTORY
+    pages_count = (len(transactions) + HISTORY_PAGE_SIZE - 1) // HISTORY_PAGE_SIZE
+    current_page = min(max(page_number, 1), pages_count)
+    start = (current_page - 1) * HISTORY_PAGE_SIZE
+    page_transactions = transactions[start : start + HISTORY_PAGE_SIZE]
+    rows = ''.join(_transaction_row(transaction, product.currency) for transaction in page_transactions)
+
+    def page_href(number: int) -> str:
+        query = {'from': date_from.isoformat() if date_from else '', 'to': date_to.isoformat() if date_to else ''}
+        return f'?{urlencode(query | {"page": str(number)})}'
+
+    page_items = []
+    for number in range(1, pages_count + 1):
+        if number == current_page:
+            page_items.append(f'<span class="page-current">{number}</span>')
+        else:
+            page_items.append(f'<a class="page-link" href="{page_href(number)}">{number}</a>')
+    if current_page < pages_count:
+        page_items.append(f'<a class="page-next" href="{page_href(current_page + 1)}">Следующая →</a>')
+    return f"""<table class="transactions-table">{TRANSACTIONS_TABLE_HEAD}<tbody>{rows}</tbody></table>
+<nav class="pagination">{''.join(page_items)}</nav>"""
 
 
 def _render_portion_history(history_loading: HistoryLoading) -> str:

@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 from . import pages
 from .data import PRODUCTS_BY_ID, DemoProduct, DemoTransaction, filter_by_posting_date
+from .export import build_export_csv
 
 DEMO_LOGIN = 'demo'
 DEMO_PASSWORD = 'demo'
@@ -103,13 +104,37 @@ def create_app(mode: DemoBankMode = DemoBankMode.NORMAL) -> FastAPI:
         # Строки, а не даты: пустое поле формы приходит как 'from='
         date_from: Annotated[str, Query(alias='from')] = '',
         date_to: Annotated[str, Query(alias='to')] = '',
+        page: int = 1,
     ) -> Response:
         if not is_signed_in(request):
             return RedirectResponse('/login', status_code=303)
         product = PRODUCTS_BY_ID.get(product_id)
         if product is None:
             return HTMLResponse(pages.layout('Не найдено', '<h1>Продукт не найден</h1>'), status_code=404)
-        return HTMLResponse(pages.product_page(product, _parse_query_date(date_from), _parse_query_date(date_to)))
+        return HTMLResponse(
+            pages.product_page(product, _parse_query_date(date_from), _parse_query_date(date_to), page_number=page)
+        )
+
+    @app.get('/products/{product_id}/export.csv')
+    async def export_history(
+        product_id: str,
+        request: Request,
+        date_from: Annotated[str, Query(alias='from')] = '',
+        date_to: Annotated[str, Query(alias='to')] = '',
+    ) -> Response:
+        if not is_signed_in(request):
+            return RedirectResponse('/login', status_code=303)
+        product = PRODUCTS_BY_ID.get(product_id)
+        if product is None or not product.has_export:
+            return HTMLResponse(pages.layout('Не найдено', '<h1>Экспорт недоступен</h1>'), status_code=404)
+        transactions = filter_by_posting_date(
+            product.transactions, _parse_query_date(date_from), _parse_query_date(date_to)
+        )
+        return Response(
+            build_export_csv(product, transactions),
+            media_type='text/csv; charset=utf-8',
+            headers={'Content-Disposition': f'attachment; filename="{product_id}.csv"'},
+        )
 
     @app.get('/api/products/{product_id}/transactions')
     async def get_history_portion(

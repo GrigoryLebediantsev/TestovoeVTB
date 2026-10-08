@@ -16,6 +16,7 @@ class HistoryLoading(enum.StrEnum):
     """Как страница продукта показывает историю операций."""
 
     PAGE = 'page'  # вся история в разметке страницы
+    NUMBERED_PAGES = 'numbered_pages'  # история в разметке, разбита на страницы с номерами
     SHOW_MORE = 'show_more'  # порции с сервера по кнопке «Показать ещё»
     SCROLL = 'scroll'  # порции с сервера при прокрутке вниз
 
@@ -49,6 +50,7 @@ class DemoProduct:
     debt: Decimal | None = None
     transactions: list[DemoTransaction] = field(default_factory=list)
     history_loading: HistoryLoading = HistoryLoading.PAGE
+    has_export: bool = False  # ссылка «Скачать CSV» на странице продукта
 
 
 # Период по умолчанию в .env — май–июнь 2026. Кабинет фильтрует по дате проведения, поэтому операция 30.04,
@@ -147,7 +149,7 @@ SAVINGS_TRANSACTIONS = [
     ),
 ]
 
-# Текущий счёт: вся история на странице, идентификаторов банк не показывает.
+# Текущий счёт: история на страницах с номерами и в экспорте CSV, идентификаторов банк не показывает.
 # Покупки по карте видны и здесь — это дубликаты операций карты.
 CURRENT_ACCOUNT_TRANSACTIONS = [
     DemoTransaction(
@@ -532,6 +534,8 @@ PRODUCTS = [
         balance=Decimal('125430.50'),
         available_balance=Decimal('125430.50'),
         transactions=CURRENT_ACCOUNT_TRANSACTIONS,
+        history_loading=HistoryLoading.NUMBERED_PAGES,
+        has_export=True,
     ),
     DemoProduct(
         product_id='acc-usd',

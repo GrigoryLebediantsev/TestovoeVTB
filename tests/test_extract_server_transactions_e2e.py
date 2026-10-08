@@ -50,7 +50,7 @@ LINKED_ACCOUNT_ID = 'acc-rub'
 EXPECTED_TRANSACTIONS_COUNT = 40
 
 EXPECTED_SOURCES = {
-    'acc-rub': ('page', 9),
+    'acc-rub': ('export', 9),
     'acc-usd': ('server_response', 12),
     'card-debit': ('server_response', 12),
     'savings': ('page', 7),

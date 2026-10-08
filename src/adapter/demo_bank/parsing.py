@@ -1,6 +1,8 @@
 """Чистые функции разбора форматов демо-банка."""
 
+import csv
 import datetime
+import io
 import re
 from dataclasses import dataclass
 from decimal import Decimal
@@ -65,6 +67,19 @@ MONEY_PATTERN = re.compile(
 MINUS_SIGNS = ('-', '−')
 PERCENT_PATTERN = re.compile(r'^(?P<number>\d+(?:,\d+)?) ?%$')
 DATE_FORMAT = '%d.%m.%Y'
+# Сумма в экспорте: '-1450,00' — без разделителей тысяч и символа валюты, валюта отдельной колонкой
+EXPORT_AMOUNT_PATTERN = re.compile(r'^(?P<sign>-?)(?P<integer>\d+)(?:,(?P<fraction>\d{1,2}))?$')
+CURRENCY_CODE_PATTERN = re.compile(r'^[A-Z]{3}$')
+EXPORT_COLUMNS = [
+    selectors.EXPORT_COLUMN_OPERATION_DATE,
+    selectors.EXPORT_COLUMN_POSTING_DATE,
+    selectors.EXPORT_COLUMN_DESCRIPTION,
+    selectors.EXPORT_COLUMN_COUNTERPARTY,
+    selectors.EXPORT_COLUMN_CATEGORY,
+    selectors.EXPORT_COLUMN_STATUS,
+    selectors.EXPORT_COLUMN_AMOUNT,
+    selectors.EXPORT_COLUMN_CURRENCY,
+]
 
 
 @dataclass
@@ -202,6 +217,32 @@ def parse_transactions(product_id: str, rows: list[TransactionRow]) -> list[doma
     return [_parse_transaction(product_id, row, id_generator) for row in rows]
 
 
+def parse_export_amount(text: str) -> Decimal:
+    match = EXPORT_AMOUNT_PATTERN.match(text.strip())
+    if not match:
+        raise ValueError('Unknown export amount format')
+    number = match['integer']
+    if match['fraction']:
+        number = f'{number}.{match["fraction"]}'
+    amount = Decimal(number)
+    return -amount if match['sign'] else amount
+
+
+def parse_export_transactions(product_id: str, content: bytes) -> list[domain.Transaction]:
+    """Приводит файл экспорта CSV к единой схеме; у операций в экспорте нет банковского идентификатора.
+
+    Незнакомый формат файла — ValueError: адаптер тогда переходит к следующему способу извлечения.
+    """
+    reader = csv.DictReader(io.StringIO(content.decode('utf-8-sig')), delimiter=selectors.EXPORT_DELIMITER)
+    try:
+        if reader.fieldnames is None or not set(EXPORT_COLUMNS) <= set(reader.fieldnames):
+            raise ValueError('Unknown export columns')
+        id_generator = domain.TransactionIdGenerator()
+        return [_parse_export_row(product_id, row, id_generator) for row in reader]
+    except csv.Error as error:
+        raise ValueError('Broken export file') from error
+
+
 def parse_product_type(text: str) -> domain.ProductType:
     product_type = PRODUCT_TYPE_BY_LABEL.get(text.strip().lower())
     if not product_type:
@@ -311,6 +352,35 @@ def _parse_server_transaction(
         counterparty=_normalize_spaces(item.counterparty) if item.counterparty else None,
         category=parse_transaction_category(item.category),
         status=parse_server_status(item.status),
+    )
+
+
+def _parse_export_row(
+    product_id: str, row: dict[str, str], id_generator: domain.TransactionIdGenerator
+) -> domain.Transaction:
+    # Короткой строке DictReader подставляет None вместо недостающих ячеек
+    if any(row.get(column) is None for column in EXPORT_COLUMNS):
+        raise ValueError('Export row is shorter than header')
+    currency = row[selectors.EXPORT_COLUMN_CURRENCY].strip()
+    if not CURRENCY_CODE_PATTERN.match(currency):
+        raise ValueError('Unknown export currency format')
+    operation_date = parse_date(row[selectors.EXPORT_COLUMN_OPERATION_DATE])
+    amount = parse_export_amount(row[selectors.EXPORT_COLUMN_AMOUNT])
+    description = _normalize_spaces(row[selectors.EXPORT_COLUMN_DESCRIPTION])
+    counterparty = row[selectors.EXPORT_COLUMN_COUNTERPARTY]
+    return domain.Transaction(
+        transaction_id=id_generator.next_id(product_id, operation_date, amount, description),
+        id_source=domain.TransactionIdSource.GENERATED,
+        product_id=product_id,
+        operation_date=operation_date,
+        posting_date=parse_optional_date(row[selectors.EXPORT_COLUMN_POSTING_DATE]),
+        amount=amount,
+        currency=currency,
+        type=domain.transaction_type_for_amount(amount),
+        description=description,
+        counterparty=None if _is_empty_cell(counterparty) else _normalize_spaces(counterparty),
+        category=parse_transaction_category(row[selectors.EXPORT_COLUMN_CATEGORY]),
+        status=parse_transaction_status(row[selectors.EXPORT_COLUMN_STATUS]),
     )
 
 

@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import Any, Literal
 
 from playwright.async_api import Error as PlaywrightError
@@ -17,6 +18,7 @@ log = logging.getLogger(__name__)
 MILLISECONDS_IN_SECOND = 1000
 # Защита от бесконечной подгрузки, если сервер всё время отвечает «есть ещё»
 MAX_HISTORY_PORTIONS = 200
+MAX_HISTORY_PAGES = 200
 SCROLL_DISTANCE_PIXELS = 100_000
 # Достаточно готовой разметки: нужные элементы затем ждём явно
 NAVIGATION_WAIT_UNTIL: Literal['domcontentloaded'] = 'domcontentloaded'
@@ -76,7 +78,7 @@ class DemoBank(Bank):
         return [await self._get_product(product_id) for product_id in product_ids]
 
     async def get_transactions(self, product_id: str, period: domain.Period) -> domain.TransactionHistory:
-        """Сначала ответы сервера, которые получает сама страница, иначе — разбор страницы (ADR 0002)."""
+        """Способы по порядку: экспорт CSV → ответы сервера на запросы страницы → разбор страницы (ADR 0002)."""
         page = self.browser.page
         history_responses: list[Response] = []
 
@@ -86,29 +88,65 @@ class DemoBank(Bank):
 
         # Своих запросов к серверу не делаем: только слушаем ответы на запросы страницы
         page.on('response', remember_history_response)
+        warnings = []
         try:
-            await self._open(f'{selectors.PRODUCTS_PATH}/{product_id}')
-            await page.locator(selectors.TRANSACTIONS_SECTION).wait_for(timeout=self._action_timeout_ms())
-            is_filter_applied = await self._apply_period_filter(period)
-            await page.locator(selectors.TRANSACTIONS_READY).wait_for(timeout=self._action_timeout_ms())
+            is_filter_applied = await self._open_product_history(product_id, period)
 
-            # Без фильтра годится любой ответ, с фильтром — только за запрошенный период
-            filter_period = period if is_filter_applied else None
-            period_responses = [
-                response
-                for response in history_responses
-                if parsing.is_history_response_url(response.url, product_id, period=filter_period)
-            ]
-            if period_responses:
-                history = await self._read_server_history(product_id, filter_period, period_responses[-1])
-            else:
-                history = await self._read_page_history(product_id)
+            history = None
+            if await page.locator(selectors.EXPORT_LINK).count() > 0:
+                try:
+                    history = await self._read_export_history(product_id)
+                except (PlaywrightError, ValueError, OSError) as error:
+                    log.warning(
+                        'Export failed, trying next source: %s', type(error).__name__, extra={'product_id': product_id}
+                    )
+                    warnings.append(f'Продукт {product_id}: экспорт не удался, использован другой способ')
+                    # Вместо файла кабинет мог открыть страницу ошибки: возвращаемся к истории продукта
+                    is_filter_applied = await self._open_product_history(product_id, period)
+
+            if history is None:
+                # Без фильтра годится любой ответ, с фильтром — только за запрошенный период
+                filter_period = period if is_filter_applied else None
+                period_responses = [
+                    response
+                    for response in history_responses
+                    if parsing.is_history_response_url(response.url, product_id, period=filter_period)
+                ]
+                if period_responses:
+                    history = await self._read_server_history(product_id, filter_period, period_responses[-1])
+                else:
+                    history = await self._read_page_history(product_id)
         finally:
             page.remove_listener('response', remember_history_response)
 
         if not is_filter_applied:
-            history.warnings.append(f'Продукт {product_id}: фильтр периода в кабинете не найден')
+            warnings.append(f'Продукт {product_id}: фильтр периода в кабинете не найден')
+        history.warnings.extend(warnings)
         return history
+
+    async def _open_product_history(self, product_id: str, period: domain.Period) -> bool:
+        """Открывает историю продукта с фильтром периода; False — фильтра в кабинете нет."""
+        page = self.browser.page
+        await self._open(f'{selectors.PRODUCTS_PATH}/{product_id}')
+        await page.locator(selectors.TRANSACTIONS_SECTION).wait_for(timeout=self._action_timeout_ms())
+        is_filter_applied = await self._apply_period_filter(period)
+        await page.locator(selectors.TRANSACTIONS_READY).wait_for(timeout=self._action_timeout_ms())
+        return is_filter_applied
+
+    async def _read_export_history(self, product_id: str) -> domain.TransactionHistory:
+        """Скачивает экспорт кнопкой кабинета, как клиент, читает файл и сразу удаляет его с диска."""
+        page = self.browser.page
+        async with page.expect_download(timeout=self._action_timeout_ms()) as download_info:
+            await page.locator(selectors.EXPORT_LINK).click()
+        download = await download_info.value
+        try:
+            content = Path(await download.path()).read_bytes()
+        finally:
+            await download.delete()
+
+        transactions = parsing.parse_export_transactions(product_id, content)
+        log.info('Export read', extra={'product_id': product_id, 'transactions_count': len(transactions)})
+        return domain.TransactionHistory(transactions=transactions, source=domain.ExtractionSource.EXPORT)
 
     async def _read_server_history(
         self, product_id: str, filter_period: domain.Period | None, first_response: Response
@@ -155,14 +193,30 @@ class DemoBank(Bank):
             await page.mouse.wheel(0, SCROLL_DISTANCE_PIXELS)
 
     async def _read_page_history(self, product_id: str) -> domain.TransactionHistory:
-        # Ключи словарей совпадают с полями TransactionRow: скрипт возвращает их тем же списком
-        rows: list[dict[str, Any]] = await self.browser.page.locator(selectors.TRANSACTION_ROW).evaluate_all(
-            READ_TRANSACTION_ROWS_SCRIPT
-        )
+        """Читает таблицу операций; если история разбита на страницы — переходит по ним, как клиент."""
+        page = self.browser.page
+        rows: list[dict[str, Any]] = []
+        warnings = []
+        pages_count = 1
+        while True:
+            # Ключи словарей совпадают с полями TransactionRow: скрипт возвращает их тем же списком
+            rows.extend(await page.locator(selectors.TRANSACTION_ROW).evaluate_all(READ_TRANSACTION_ROWS_SCRIPT))
+            if await page.locator(selectors.NEXT_PAGE_LINK).count() == 0:
+                break
+            if pages_count >= MAX_HISTORY_PAGES:
+                warnings.append(f'Продукт {product_id}: история загружена не полностью')
+                break
+            async with page.expect_navigation(timeout=self._action_timeout_ms(), wait_until=NAVIGATION_WAIT_UNTIL):
+                await page.locator(selectors.NEXT_PAGE_LINK).click()
+            await page.locator(selectors.TRANSACTIONS_READY).wait_for(timeout=self._action_timeout_ms())
+            pages_count += 1
+
+        log.info('History pages read', extra={'product_id': product_id, 'pages_count': pages_count})
         transaction_rows = [parsing.TransactionRow(**row) for row in rows]
         return domain.TransactionHistory(
             transactions=parsing.parse_transactions(product_id, transaction_rows),
             source=domain.ExtractionSource.PAGE,
+            warnings=warnings,
         )
 
     async def _apply_period_filter(self, period: domain.Period) -> bool:

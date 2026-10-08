@@ -41,3 +41,18 @@ SCROLL_SENTINEL = '[data-testid="transactions"] .load-more-sentinel'
 HISTORY_API_PATH = '/api/products/{product_id}/transactions'
 HISTORY_API_FROM_PARAM = 'from'
 HISTORY_API_TO_PARAM = 'to'
+
+# Экспорт истории в CSV: ссылка на странице продукта и колонки файла
+EXPORT_LINK = '[data-testid="transactions"] a.export-csv'
+EXPORT_DELIMITER = ';'
+EXPORT_COLUMN_OPERATION_DATE = 'Дата операции'
+EXPORT_COLUMN_POSTING_DATE = 'Дата проведения'
+EXPORT_COLUMN_DESCRIPTION = 'Описание'
+EXPORT_COLUMN_COUNTERPARTY = 'Контрагент'
+EXPORT_COLUMN_CATEGORY = 'Категория'
+EXPORT_COLUMN_STATUS = 'Статус'
+EXPORT_COLUMN_AMOUNT = 'Сумма'
+EXPORT_COLUMN_CURRENCY = 'Валюта'
+
+# История на страницах с номерами
+NEXT_PAGE_LINK = '[data-testid="transactions"] .pagination a.page-next'
