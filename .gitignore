@@ -4,6 +4,16 @@
 # Переменные окружения
 .env
 .env.*
+!.env.example
 
 # IDE
 .idea/
+
+# Результаты запусков
+output/
+
+# Кэши инструментов
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/

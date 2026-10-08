@@ -2,4 +2,37 @@
 name = "testovoevtb"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "playwright>=1.63.0",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+]
+
+[dependency-groups]
+dev = [
+    "fastapi>=0.142.4",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.10",
+    "uvicorn>=0.54.0",
+]
+
+[tool.ruff]
+line-length = 120
+# Только Python: Markdown-документы ruff не трогает
+include = ['*.py', '*.pyi']
+
+[tool.ruff.lint]
+select = ['E', 'F', 'I', 'B', 'C4', 'UP']
+
+[tool.ruff.format]
+quote-style = 'single'
+
+[tool.mypy]
+strict = true
+plugins = ['pydantic.mypy']
+
+[tool.pytest.ini_options]
+testpaths = ['tests']
+pythonpath = ['.']
