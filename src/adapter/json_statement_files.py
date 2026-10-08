@@ -67,12 +67,16 @@ class ReportContent(pydantic.BaseModel):
 
 class JsonStatementFiles(StatementFiles):
     @staticmethod
-    async def read_extracted_statement(path: str) -> domain.ExtractedStatement:
+    async def read_extracted_statement(path: str) -> domain.ExtractedStatement | None:
         statement_path = Path(path)
         if statement_path.is_dir():
             statement_path = statement_path / STATEMENT_FILE_NAME
         statement = _read_json_file(statement_path, StatementContent)
+        if statement is None:
+            return None
         report = _read_json_file(statement_path.parent / REPORT_FILE_NAME, ReportContent)
+        if report is None:
+            return None
         return domain.ExtractedStatement(
             period=statement.period.to_domain(),
             transactions=[transaction.to_domain() for transaction in statement.transactions],
@@ -80,17 +84,20 @@ class JsonStatementFiles(StatementFiles):
         )
 
     @staticmethod
-    async def read_reference_statement(path: str) -> domain.ReferenceStatement:
+    async def read_reference_statement(path: str) -> domain.ReferenceStatement | None:
         reference = _read_json_file(Path(path), StatementContent)
+        if reference is None:
+            return None
         return domain.ReferenceStatement(
             period=reference.period.to_domain(),
             transactions=[transaction.to_domain() for transaction in reference.transactions],
         )
 
 
-def _read_json_file[T: pydantic.BaseModel](path: Path, content_class: type[T]) -> T:
+def _read_json_file[T: pydantic.BaseModel](path: Path, content_class: type[T]) -> T | None:
     if not path.is_file():
-        raise domain.EvaluationFileNotFound(str(path))
+        log.warning('Evaluation file not found', extra={'path': str(path)})
+        return None
     try:
         # Суммы читаем как Decimal: через float 6890.41 потеряло бы точность
         data = json.loads(path.read_text(encoding='utf-8'), parse_float=Decimal)

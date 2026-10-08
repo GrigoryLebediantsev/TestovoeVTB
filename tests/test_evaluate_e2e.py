@@ -36,10 +36,37 @@ def test_evaluate_flow(demo_bank: DemoBankServer, client_browser: ClientBrowser,
 
 
 def test_evaluate_missing_file_flow(tmp_path: Path) -> None:
-    result = run_program(NO_SETTINGS, tmp_path, arguments=['evaluate', str(tmp_path / 'missing')])
+    missing_path = str(tmp_path / 'missing')
+
+    result = run_program(NO_SETTINGS, tmp_path, arguments=['evaluate', missing_path])
 
     assert result.returncode == EXIT_FAILED, result.output
-    assert 'Оценка не выполнена: Файл не найден' in result.output
+    assert f'Оценка не выполнена: Файл не найден: {missing_path}' in result.output
+
+
+def test_evaluate_empty_folder_flow(tmp_path: Path) -> None:
+    empty_folder = tmp_path / 'run'
+    empty_folder.mkdir()
+
+    result = run_program(NO_SETTINGS, tmp_path, arguments=['evaluate', str(empty_folder)])
+
+    assert result.returncode == EXIT_FAILED, result.output
+    # В сообщении путь, который ввёл человек
+    assert result.output.rstrip().endswith(f'Оценка не выполнена: Файл не найден: {empty_folder}')
+
+
+def test_evaluate_missing_reference_flow(
+    demo_bank: DemoBankServer, client_browser: ClientBrowser, tmp_path: Path
+) -> None:
+    run = extract_statement(demo_bank, client_browser, tmp_path / 'run')
+    missing_reference = str(tmp_path / 'missing_reference.json')
+
+    result = run_program(
+        NO_SETTINGS, tmp_path, arguments=['evaluate', str(run.run_folder), '--reference', missing_reference]
+    )
+
+    assert result.returncode == EXIT_FAILED, result.output
+    assert f'Оценка не выполнена: Файл не найден: {missing_reference}' in result.output
 
 
 def test_evaluate_period_outside_reference_flow(tmp_path: Path) -> None:
