@@ -30,7 +30,7 @@ async def run_extraction(arguments: list[str]) -> int:
         bank=settings.extraction.BANK,
         period_from=settings.extraction.PERIOD_FROM,
         period_to=settings.extraction.PERIOD_TO,
-        format=settings.storage.FORMAT,
+        format=settings.extraction.FORMAT,
     )
     extraction_input = cli.parse_input(arguments, launch_defaults)
     if extraction_input is None:

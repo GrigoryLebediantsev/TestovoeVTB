@@ -122,6 +122,7 @@ cp .env.example .env                     # настройки по умолча�
 | `EXTRACTION__BANK`                      | обязательна             | Банк: пока только `demo_bank`                                                    |
 | `EXTRACTION__PERIOD_FROM`               | обязательна             | Начало периода, `ГГГГ-ММ-ДД`                                                     |
 | `EXTRACTION__PERIOD_TO`                 | обязательна             | Конец периода, `ГГГГ-ММ-ДД`                                                      |
+| `EXTRACTION__FORMAT`                    | `both`                  | Файлы выписки: `json`, `csv` или `both`; отчёт пишется всегда                    |
 | `DEMO_BANK__BASE_URL`                   | обязательна             | Адрес кабинета демо-банка                                                        |
 | `DEMO_BANK__LOGIN_TIMEOUT_SECONDS`      | `300`                   | Сколько ждать, пока клиент войдёт                                                |
 | `DEMO_BANK__ACTION_TIMEOUT_SECONDS`     | `15`                    | Таймаут одного действия в кабинете: открыть страницу, дождаться элемента         |
@@ -132,7 +133,6 @@ cp .env.example .env                     # настройки по умолча�
 | `BROWSER__CONSENT_TIMEOUT_SECONDS`      | `300`                   | Сколько ждать решения клиента на странице согласия                               |
 | `BROWSER__WINDOW_CLOSE_TIMEOUT_SECONDS` | `600`                   | `launch`: сколько ждать, пока клиент закроет окно с итогом                        |
 | `STORAGE__OUTPUT_DIR`                   | `output`                | Папка результатов                                                                |
-| `STORAGE__FORMAT`                       | `both`                  | Файлы выписки: `json`, `csv` или `both`; отчёт пишется всегда                    |
 | `LOGGER__LEVEL`                         | `INFO`                  | Уровень лога                                                                     |
 | `LOGGER__PRETTY_CONSOLE`                | `false`                 | `true` — цветной вывод в консоль, `false` — JSON                                 |
 | `LOGGER__APP_NAME`                      | `app`                   | Имя приложения в записях лога                                                    |

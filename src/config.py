@@ -19,10 +19,6 @@ class ExtractionConfig(pydantic.BaseModel):
     BANK: BankName
     PERIOD_FROM: datetime.date
     PERIOD_TO: datetime.date
-
-
-class StorageConfig(FileStorageConfig):
-    # Формат — параметр запуска, а не адаптера: в .env рядом с папкой результатов, во вход сценария — из main.py.
     # Какие файлы выписки писать; отчёт пишется всегда
     FORMAT: domain.StatementFormat = domain.StatementFormat.BOTH
 
@@ -30,8 +26,8 @@ class StorageConfig(FileStorageConfig):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', case_sensitive=False, env_nested_delimiter='__')
 
-    extraction: ExtractionConfig  # EXTRACTION__BANK
+    extraction: ExtractionConfig  # EXTRACTION__BANK, EXTRACTION__FORMAT
     demo_bank: DemoBankConfig  # DEMO_BANK__BASE_URL
     browser: BrowserWindowConfig = BrowserWindowConfig()  # BROWSER__MODE
-    storage: StorageConfig = StorageConfig()  # STORAGE__OUTPUT_DIR, STORAGE__FORMAT
+    storage: FileStorageConfig = FileStorageConfig()  # STORAGE__OUTPUT_DIR
     logger: LoggerConfig = LoggerConfig()  # LOGGER__LEVEL

@@ -226,7 +226,7 @@ def test_statement_formats_flow(
 ) -> None:
     output_dir = tmp_path / 'output'
     env = demo_bank.program_env(client_browser_cdp_url=client_browser.cdp_url, output_dir=output_dir)
-    process = start_program(env | {'STORAGE__FORMAT': statement_format}, tmp_path)
+    process = start_program(env | {'EXTRACTION__FORMAT': statement_format}, tmp_path)
 
     give_consent_and_log_in(client_browser.context, expected_consent_texts=[])
     result = finish_program(process)
