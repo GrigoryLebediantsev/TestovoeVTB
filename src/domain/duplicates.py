@@ -34,7 +34,7 @@ def find_card_duplicates(products: list[Product], transactions: list[Transaction
         for card_transaction in comparable_transactions:
             if card_transaction.product_id != card.product_id:
                 continue
-            account_transaction = _find_same_operation(card_transaction, unmatched_account_transactions)
+            account_transaction = _find_same_transaction(card_transaction, unmatched_account_transactions)
             if account_transaction is None:
                 continue
             unmatched_account_transactions.remove(account_transaction)
@@ -42,7 +42,9 @@ def find_card_duplicates(products: list[Product], transactions: list[Transaction
     return pairs
 
 
-def _find_same_operation(card_transaction: Transaction, account_transactions: list[Transaction]) -> Transaction | None:
+def _find_same_transaction(
+    card_transaction: Transaction, account_transactions: list[Transaction]
+) -> Transaction | None:
     card_key = _build_matching_key(card_transaction)
     for account_transaction in account_transactions:
         if _build_matching_key(account_transaction) == card_key:
