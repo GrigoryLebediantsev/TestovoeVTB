@@ -2,13 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.e2e_support import EXIT_FAILED, run_program
+from tests.e2e_support import DEMO_PERIOD_FROM, DEMO_PERIOD_TO, EXIT_FAILED, run_program
 
 # Браузер и демо-банк не нужны: неверные параметры отклоняются до открытия браузера
 VALID_ENV = {
     'EXTRACTION__BANK': 'demo_bank',
-    'EXTRACTION__PERIOD_FROM': '2026-05-01',
-    'EXTRACTION__PERIOD_TO': '2026-06-30',
+    'EXTRACTION__PERIOD_FROM': DEMO_PERIOD_FROM,
+    'EXTRACTION__PERIOD_TO': DEMO_PERIOD_TO,
     'DEMO_BANK__BASE_URL': 'http://127.0.0.1:9',
     'BROWSER__MODE': 'cdp',
     'BROWSER__CDP_URL': 'http://127.0.0.1:9',

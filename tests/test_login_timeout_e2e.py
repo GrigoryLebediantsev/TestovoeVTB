@@ -3,6 +3,7 @@ from pathlib import Path
 from tests.e2e_support import (
     CLIENT_ACTION_TIMEOUT_SECONDS,
     EXIT_FAILED,
+    FAILURE_PAGE_TITLE,
     ClientBrowser,
     DemoBankServer,
     find_page_with_button,
@@ -12,7 +13,6 @@ from tests.e2e_support import (
     wait_for,
 )
 
-FAILURE_PAGE_TITLE = 'Выписка не сформирована'
 LOGIN_TIMEOUT_REASON = 'Клиент не вошёл в личный кабинет за отведённое время'
 SHORT_LOGIN_TIMEOUT = {'DEMO_BANK__LOGIN_TIMEOUT_SECONDS': '2'}
 

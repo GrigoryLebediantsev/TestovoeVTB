@@ -2,16 +2,16 @@ import json
 from pathlib import Path
 
 from tests.e2e_support import (
+    DEMO_PERIOD_FROM,
+    DEMO_PERIOD_TO,
     EXIT_WITH_WARNINGS,
+    NORMAL_MODE_TRANSACTIONS_COUNT,
     ClientBrowser,
     DemoBankServer,
     finish_program,
     give_consent_and_log_in,
     start_program,
 )
-
-PERIOD_FROM = '2026-05-01'
-PERIOD_TO = '2026-06-30'
 
 # Операции за период: история USD — тремя порциями по «Показать ещё», карты — тремя порциями при прокрутке
 EXPECTED_USD_IDS = [f'u-{number:03d}' for number in range(1, 13)]
@@ -54,7 +54,6 @@ EXACT_AMOUNT_TEXTS = ['"amount": -45.90', '"amount": -15000.00']
 EXPECTED_DUPLICATE_CARD_IDS = ['c-001', 'c-003', 'c-005', 'c-007']
 
 LINKED_ACCOUNT_ID = 'acc-rub'
-EXPECTED_TRANSACTIONS_COUNT = 40
 
 EXPECTED_SOURCES = {
     'acc-rub': ('export', 9),
@@ -70,9 +69,7 @@ def test_extract_server_transactions_flow(
 ) -> None:
     output_dir = tmp_path / 'output'
     env = demo_bank.program_env(client_browser_cdp_url=client_browser.cdp_url, output_dir=output_dir)
-    process = start_program(
-        env | {'EXTRACTION__PERIOD_FROM': PERIOD_FROM, 'EXTRACTION__PERIOD_TO': PERIOD_TO}, tmp_path
-    )
+    process = start_program(env, tmp_path)
 
     give_consent_and_log_in(client_browser.context, expected_consent_texts=[])
     result = finish_program(process)
@@ -101,7 +98,9 @@ def test_extract_server_transactions_flow(
     api_calls = demo_bank.get_api_calls()
     for product_id in ('acc-usd', 'card-debit'):
         product_calls = [call for call in api_calls if call['product_id'] == product_id]
-        period_calls = [call for call in product_calls if call['from'] == PERIOD_FROM and call['to'] == PERIOD_TO]
+        period_calls = [
+            call for call in product_calls if call['from'] == DEMO_PERIOD_FROM and call['to'] == DEMO_PERIOD_TO
+        ]
         other_calls = [call for call in product_calls if call not in period_calls]
         assert [call['offset'] for call in period_calls] == EXPECTED_PORTION_OFFSETS
         # До выставления фильтра страница успевает запросить только первую порцию без периода
@@ -117,7 +116,7 @@ def test_extract_server_transactions_flow(
         item['product_id']: (item['extraction_source'], item['transactions_count']) for item in report['products']
     }
     assert sources == EXPECTED_SOURCES
-    assert report['transactions_count'] == len(transactions) == EXPECTED_TRANSACTIONS_COUNT
+    assert report['transactions_count'] == len(transactions) == NORMAL_MODE_TRANSACTIONS_COUNT
 
     for card_id in EXPECTED_DUPLICATE_CARD_IDS:
         account_copy = _account_copy_of(transactions_by_id[card_id], transactions)

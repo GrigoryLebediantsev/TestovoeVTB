@@ -4,6 +4,7 @@ from pathlib import Path
 from tests.e2e_support import (
     EXIT_COMPLETE,
     EXIT_FAILED,
+    NORMAL_MODE_TRANSACTIONS_COUNT,
     ClientBrowser,
     DemoBankServer,
     extract_statement,
@@ -12,7 +13,6 @@ from tests.e2e_support import (
 
 # Оценке .env не нужен: запускаем с пустым окружением
 NO_SETTINGS: dict[str, str] = {}
-EXPECTED_TRANSACTIONS_COUNT = 40
 JULY_STATEMENT = {'period': {'from': '2026-07-01', 'to': '2026-07-31'}, 'transactions': []}
 
 
@@ -26,8 +26,8 @@ def test_evaluate_flow(demo_bank: DemoBankServer, client_browser: ClientBrowser,
 
         assert result.returncode == EXIT_COMPLETE, result.output
         assert (
-            f'Операций в выписке: {EXPECTED_TRANSACTIONS_COUNT}, в эталоне: {EXPECTED_TRANSACTIONS_COUNT}, '
-            f'совпало: {EXPECTED_TRANSACTIONS_COUNT}'
+            f'Операций в выписке: {NORMAL_MODE_TRANSACTIONS_COUNT}, в эталоне: {NORMAL_MODE_TRANSACTIONS_COUNT}, '
+            f'совпало: {NORMAL_MODE_TRANSACTIONS_COUNT}'
         ) in result.output
         assert 'Точность (precision): 1.000' in result.output
         assert 'Полнота (recall): 1.000' in result.output

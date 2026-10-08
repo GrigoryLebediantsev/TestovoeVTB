@@ -11,9 +11,6 @@ from tests.e2e_support import (
     start_program,
 )
 
-PERIOD_FROM = '2026-05-01'
-PERIOD_TO = '2026-06-30'
-
 GENERATED_ID_PATTERN = re.compile(r'^[0-9a-f]{16}-\d+$')
 
 
@@ -108,9 +105,7 @@ def test_extract_page_transactions_flow(
 ) -> None:
     output_dir = tmp_path / 'output'
     env = demo_bank.program_env(client_browser_cdp_url=client_browser.cdp_url, output_dir=output_dir)
-    process = start_program(
-        env | {'EXTRACTION__PERIOD_FROM': PERIOD_FROM, 'EXTRACTION__PERIOD_TO': PERIOD_TO}, tmp_path
-    )
+    process = start_program(env, tmp_path)
 
     give_consent_and_log_in(client_browser.context, expected_consent_texts=[])
     result = finish_program(process)

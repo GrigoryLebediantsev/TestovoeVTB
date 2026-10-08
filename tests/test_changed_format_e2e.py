@@ -11,9 +11,6 @@ from tests.e2e_support import (
     start_program,
 )
 
-PERIOD_FROM = '2026-05-01'
-PERIOD_TO = '2026-06-30'
-
 # В изменённом формате банк переименовал статус этой операции: «Проведена» → «Исполнена»
 RENAMED_STATUS_TRANSACTION_ID = 'sv-0003'
 UNKNOWN_STATUS_WARNING = 'Продукт savings: незнакомый статус операции «Исполнена»: 1'
@@ -46,9 +43,7 @@ def _extract_statement(demo_bank: DemoBankServer, client_browser: ClientBrowser,
     work_dir.mkdir()
     output_dir = work_dir / 'output'
     env = demo_bank.program_env(client_browser_cdp_url=client_browser.cdp_url, output_dir=output_dir)
-    process = start_program(
-        env | {'EXTRACTION__PERIOD_FROM': PERIOD_FROM, 'EXTRACTION__PERIOD_TO': PERIOD_TO}, work_dir
-    )
+    process = start_program(env, work_dir)
 
     give_consent_and_log_in(client_browser.context, expected_consent_texts=[])
     result = finish_program(process)

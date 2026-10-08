@@ -4,6 +4,7 @@ from typing import Any
 
 from tests.e2e_support import (
     EXIT_WITH_WARNINGS,
+    SUMMARY_PAGE_TITLE,
     ClientBrowser,
     DemoBankServer,
     find_sensitive_values,
@@ -13,7 +14,6 @@ from tests.e2e_support import (
     start_program,
 )
 
-SUMMARY_PAGE_TITLE = 'Выписка сформирована'
 # Период в .env — май–июнь, аргументы сужают его до июня
 PERIOD_ARGUMENTS = ['--from', '2026-06-01', '--to', '2026-06-30']
 EXPECTED_PERIOD = {'from': '2026-06-01', 'to': '2026-06-30'}
