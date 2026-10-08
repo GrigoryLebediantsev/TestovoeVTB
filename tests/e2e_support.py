@@ -22,6 +22,10 @@ DEMO_LOGIN = 'demo'
 DEMO_PASSWORD = 'demo'
 DEMO_ONE_TIME_CODE = '0000'
 
+# Код завершения: выписка сохранена, есть предупреждения. В обычном режиме демо-банка они есть всегда:
+# дубликаты операций карты и операции вне периода
+EXIT_WITH_WARNINGS = 2
+
 
 @dataclass
 class ProgramResult:

@@ -11,7 +11,10 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 STATEMENT_FILE_NAME = 'statement.json'
+PRODUCTS_FILE_NAME = 'products.csv'
+TRANSACTIONS_FILE_NAME = 'transactions.csv'
 REPORT_FILE_NAME = 'extraction_report.json'
+DURATION_PRECISION_DIGITS = 1
 
 
 async def extract_statement(self: Usecase, input: dto.ExtractStatementInput) -> dto.ExtractStatementOutput:
@@ -37,6 +40,7 @@ async def extract_statement(self: Usecase, input: dto.ExtractStatementInput) -> 
         warnings.extend(product_extraction.warnings)
     warnings.extend(_mark_card_duplicates(products, transactions))
     extracted_at = datetime.datetime.now(datetime.UTC)
+    duration_seconds = round((extracted_at - started_at).total_seconds(), DURATION_PRECISION_DIGITS)
 
     statement = domain.Statement(
         bank=input.bank, extracted_at=extracted_at, period=period, products=products, transactions=transactions
@@ -47,20 +51,44 @@ async def extract_statement(self: Usecase, input: dto.ExtractStatementInput) -> 
         consent=consent,
         products_count=len(products),
         transactions_count=len(transactions),
+        duration_seconds=duration_seconds,
         products=product_reports,
         warnings=warnings,
     )
 
     folder_name = domain.build_run_folder_name(input.bank, started_at)
-    statement_content = dto.StatementOutput.from_domain(statement).model_dump()
+    await _save_statement(self, folder_name, statement, input.format)
     report_content = dto.ExtractionReportOutput.from_domain(report).model_dump()
-    output_folder = await self.storage.save_json(folder_name, STATEMENT_FILE_NAME, statement_content)
-    await self.storage.save_json(folder_name, REPORT_FILE_NAME, report_content)
-    log.info('Statement saved', extra={'output_folder': output_folder})
+    output_folder = await self.storage.save_json(folder_name, REPORT_FILE_NAME, report_content)
+    log.info('Statement saved', extra={'output_folder': output_folder, 'format': input.format})
 
     return dto.ExtractStatementOutput(
-        output_folder=output_folder, products_count=len(products), transactions_count=len(transactions)
+        output_folder=output_folder,
+        products_count=len(products),
+        transactions_count=len(transactions),
+        warnings_count=len(report.warnings),
+        errors_count=len(report.errors),
+        is_complete=report.is_complete(),
     )
+
+
+async def _save_statement(
+    self: Usecase, folder_name: str, statement: domain.Statement, statement_format: domain.StatementFormat
+) -> None:
+    if statement_format.includes_json():
+        statement_content = dto.StatementOutput.from_domain(statement).model_dump()
+        await self.storage.save_json(folder_name, STATEMENT_FILE_NAME, statement_content)
+    if statement_format.includes_csv():
+        product_rows = [dto.ProductCsvRowOutput.from_domain(product).model_dump() for product in statement.products]
+        transaction_rows = [
+            dto.TransactionOutput.from_domain(transaction).model_dump() for transaction in statement.transactions
+        ]
+        await self.storage.save_csv(
+            folder_name, PRODUCTS_FILE_NAME, list(dto.ProductCsvRowOutput.model_fields), product_rows
+        )
+        await self.storage.save_csv(
+            folder_name, TRANSACTIONS_FILE_NAME, list(dto.TransactionOutput.model_fields), transaction_rows
+        )
 
 
 @dataclass
@@ -89,6 +117,7 @@ async def _extract_transactions(self: Usecase, product: domain.Product, period: 
     )
     product_report = domain.ProductReport(
         product_id=product.product_id,
+        masked_number=product.masked_number,
         status=domain.ProductExtractionStatus.COMPLETE,
         extraction_source=history.source,
         transactions_count=len(period_split.inside),

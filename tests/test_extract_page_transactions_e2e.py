@@ -2,7 +2,14 @@ import json
 import re
 from pathlib import Path
 
-from tests.e2e_support import ClientBrowser, DemoBankServer, finish_program, give_consent_and_log_in, start_program
+from tests.e2e_support import (
+    EXIT_WITH_WARNINGS,
+    ClientBrowser,
+    DemoBankServer,
+    finish_program,
+    give_consent_and_log_in,
+    start_program,
+)
 
 PERIOD_FROM = '2026-05-01'
 PERIOD_TO = '2026-06-30'
@@ -80,12 +87,14 @@ EXACT_AMOUNT_TEXTS = ['"amount": 50000.00', '"amount": -20000.00', '"amount": 68
 
 EXPECTED_SAVINGS_REPORT = {
     'product_id': 'savings',
+    'masked_number': '**** 1234',
     'status': 'complete',
     'extraction_source': 'page',
     'transactions_count': 7,
 }
 EXPECTED_LOAN_REPORT = {
     'product_id': 'loan',
+    'masked_number': '**** 3322',
     'status': 'complete',
     'extraction_source': 'page',
     'transactions_count': 0,
@@ -104,7 +113,7 @@ def test_extract_page_transactions_flow(
     give_consent_and_log_in(client_browser.context, expected_consent_texts=[])
     result = finish_program(process)
 
-    assert result.returncode == 0, result.output
+    assert result.returncode == EXIT_WITH_WARNINGS, result.output
     [run_folder] = list(output_dir.iterdir())
     statement_text = (run_folder / 'statement.json').read_text(encoding='utf-8')
     for amount_text in EXACT_AMOUNT_TEXTS:

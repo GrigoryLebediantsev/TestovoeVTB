@@ -7,6 +7,7 @@ log = logging.getLogger(__name__)
 
 EXIT_COMPLETE = 0
 EXIT_FAILED = 1
+EXIT_WITH_WARNINGS = 2  # выписка сохранена, но есть предупреждения, ошибки или пропуски
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,4 +33,5 @@ async def run(arguments: list[str], default_input: dto.ExtractStatementInput) ->
     print(f'Выписка сохранена: {result.output_folder}')
     print(f'Продуктов: {result.products_count}')
     print(f'Операций: {result.transactions_count}')
-    return EXIT_COMPLETE
+    print(f'Предупреждений: {result.warnings_count}, ошибок: {result.errors_count}')
+    return EXIT_COMPLETE if result.is_complete else EXIT_WITH_WARNINGS

@@ -46,6 +46,7 @@ default_input = dto.ExtractStatementInput(
     bank=settings.extraction.BANK,
     period_from=settings.extraction.PERIOD_FROM,
     period_to=settings.extraction.PERIOD_TO,
+    format=settings.storage.FORMAT,
 )
 
 

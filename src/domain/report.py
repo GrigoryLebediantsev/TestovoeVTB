@@ -15,6 +15,7 @@ class ProductExtractionStatus(enum.StrEnum):
 @dataclass
 class ProductReport:
     product_id: str
+    masked_number: str
     status: ProductExtractionStatus
     extraction_source: ExtractionSource
     transactions_count: int
@@ -27,5 +28,14 @@ class ExtractionReport:
     consent: Consent
     products_count: int
     transactions_count: int
+    duration_seconds: float
     products: list[ProductReport] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)  # только маскированные значения
+    # Только маскированные значения
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    def is_complete(self) -> bool:
+        """Всё извлечено полностью: ни предупреждений, ни ошибок, ни продуктов с пропусками."""
+        if self.warnings or self.errors:
+            return False
+        return all(product.status == ProductExtractionStatus.COMPLETE for product in self.products)

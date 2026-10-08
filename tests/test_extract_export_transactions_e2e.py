@@ -2,7 +2,14 @@ import json
 import re
 from pathlib import Path
 
-from tests.e2e_support import ClientBrowser, DemoBankServer, finish_program, give_consent_and_log_in, start_program
+from tests.e2e_support import (
+    EXIT_WITH_WARNINGS,
+    ClientBrowser,
+    DemoBankServer,
+    finish_program,
+    give_consent_and_log_in,
+    start_program,
+)
 
 PERIOD_FROM = '2026-05-01'
 PERIOD_TO = '2026-06-30'
@@ -88,7 +95,7 @@ def test_extract_export_transactions_flow(
     give_consent_and_log_in(client_browser.context, expected_consent_texts=[])
     result = finish_program(process)
 
-    assert result.returncode == 0, result.output
+    assert result.returncode == EXIT_WITH_WARNINGS, result.output
     [run_folder] = list(output_dir.iterdir())
     statement = json.loads((run_folder / 'statement.json').read_text(encoding='utf-8'))
 
@@ -104,4 +111,9 @@ def test_extract_export_transactions_flow(
     }
     assert sources == EXPECTED_SOURCES
     # Скачанный файл экспорта не остаётся в папке результата
-    assert sorted(path.name for path in run_folder.iterdir()) == ['extraction_report.json', 'statement.json']
+    assert sorted(path.name for path in run_folder.iterdir()) == [
+        'extraction_report.json',
+        'products.csv',
+        'statement.json',
+        'transactions.csv',
+    ]

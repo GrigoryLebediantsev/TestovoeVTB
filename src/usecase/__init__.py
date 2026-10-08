@@ -31,6 +31,12 @@ class ResultStorage(typing.Protocol):
         """Сохраняет JSON-файл в папку запуска и возвращает путь к этой папке."""
         ...
 
+    async def save_csv(
+        self, folder_name: str, file_name: str, columns: list[str], rows: list[dict[str, object]]
+    ) -> str:
+        """Сохраняет CSV-таблицу в папку запуска и возвращает путь к этой папке."""
+        ...
+
 
 @dataclass
 class Usecase:

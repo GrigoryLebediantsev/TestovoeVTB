@@ -13,7 +13,7 @@ from .masking import mask_number
 from .period import Period
 from .product import Product, ProductDetails, ProductRequisites, ProductType
 from .report import ExtractionReport, ProductExtractionStatus, ProductReport
-from .statement import Statement, build_run_folder_name
+from .statement import Statement, StatementFormat, build_run_folder_name
 from .transaction import (
     ExtractionSource,
     PeriodSplit,
@@ -50,6 +50,7 @@ __all__ = [
     'ProductType',
     'ProductsNotLoaded',
     'Statement',
+    'StatementFormat',
     'Transaction',
     'TransactionCategory',
     'TransactionHistory',

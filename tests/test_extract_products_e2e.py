@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from tests.e2e_support import (
+    EXIT_WITH_WARNINGS,
     ClientBrowser,
     DemoBankServer,
     finish_program,
@@ -112,7 +113,7 @@ def test_extract_products_flow(demo_bank: DemoBankServer, client_browser: Client
     give_consent_and_log_in(client_browser.context, expected_consent_texts=CONSENT_PAGE_TEXTS)
     result = finish_program(process)
 
-    assert result.returncode == 0, result.output
+    assert result.returncode == EXIT_WITH_WARNINGS, result.output
     [run_folder] = list(output_dir.iterdir())
     assert run_folder.name.startswith('demo_bank_')
 

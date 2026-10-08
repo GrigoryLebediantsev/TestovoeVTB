@@ -21,12 +21,16 @@ class ExtractStatementInput(pydantic.BaseModel):
     bank: str
     period_from: datetime.date
     period_to: datetime.date
+    format: domain.StatementFormat = domain.StatementFormat.BOTH
 
 
 class ExtractStatementOutput(pydantic.BaseModel):
     output_folder: str
     products_count: int
     transactions_count: int
+    warnings_count: int
+    errors_count: int
+    is_complete: bool = pydantic.Field(description='Нет предупреждений, ошибок и продуктов с пропусками')
 
 
 class PeriodOutput(pydantic.BaseModel):
@@ -98,6 +102,49 @@ class ProductOutput(pydantic.BaseModel):
             linked_account_id=product.linked_account_id,
             requisites=requisites,
             details=ProductDetailsOutput.from_domain(product.details),
+        )
+
+
+class ProductCsvRowOutput(pydantic.BaseModel):
+    """Строка products.csv: вложенные реквизиты и метаданные — плоскими колонками."""
+
+    product_id: str
+    type: domain.ProductType
+    name: str
+    masked_number: str
+    currency: str
+    balance: Money | None
+    available_balance: Money | None
+    linked_account_id: str | None
+    requisites_account_number: str | None
+    requisites_bic: str | None
+    requisites_correspondent_account: str | None
+    requisites_bank_name: str | None
+    details_interest_rate: Decimal | None
+    details_opened_at: datetime.date | None
+    details_credit_limit: Money | None
+    details_debt: Money | None
+
+    @classmethod
+    def from_domain(cls, product: domain.Product) -> ProductCsvRowOutput:
+        requisites = product.requisites or domain.ProductRequisites()
+        return cls(
+            product_id=product.product_id,
+            type=product.type,
+            name=product.name,
+            masked_number=product.masked_number,
+            currency=product.currency,
+            balance=product.balance,
+            available_balance=product.available_balance,
+            linked_account_id=product.linked_account_id,
+            requisites_account_number=requisites.account_number,
+            requisites_bic=requisites.bic,
+            requisites_correspondent_account=requisites.correspondent_account,
+            requisites_bank_name=requisites.bank_name,
+            details_interest_rate=product.details.interest_rate,
+            details_opened_at=product.details.opened_at,
+            details_credit_limit=product.details.credit_limit,
+            details_debt=product.details.debt,
         )
 
 
